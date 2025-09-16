@@ -91,6 +91,8 @@ fsearch_list_view_set_selection_handlers(FsearchListView *view,
                                          FsearchListViewNumSelectedFunc num_selected_func,
                                          gpointer user_data);
 
+
+
 void
 fsearch_list_view_column_set_visible(FsearchListView *view, FsearchListViewColumn *col, gboolean visible);
 

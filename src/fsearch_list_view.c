@@ -105,7 +105,11 @@ enum {
     UNSET_ROW = -3,
 };
 
-enum { FSEARCH_LIST_VIEW_SIGNAL_ROW_ACTIVATED, FSEARCH_LIST_VIEW_SIGNAL_POPUP, NUM_FSEARCH_LIST_VIEW_SIGNALS };
+enum {
+    FSEARCH_LIST_VIEW_SIGNAL_ROW_ACTIVATED,
+    FSEARCH_LIST_VIEW_SIGNAL_POPUP,
+    NUM_FSEARCH_LIST_VIEW_SIGNALS
+};
 
 static guint signals[NUM_FSEARCH_LIST_VIEW_SIGNALS];
 
@@ -1122,6 +1126,8 @@ on_fsearch_list_view_header_drag_gesture_end(GtkGestureDrag *gesture,
     }
 }
 
+
+
 static void
 on_fsearch_list_view_header_drag_gesture_update(GtkGestureDrag *gesture,
                                                 gdouble offset_x,
@@ -1970,6 +1976,8 @@ fsearch_list_view_init(FsearchListView *view) {
                      G_CALLBACK(on_fsearch_list_view_header_drag_gesture_update),
                      view);
     g_signal_connect(view->header_drag_gesture, "drag-end", G_CALLBACK(on_fsearch_list_view_header_drag_gesture_end), view);
+
+    
     GtkStyleContext *style = gtk_widget_get_style_context(GTK_WIDGET(view));
     gtk_style_context_add_class(style, GTK_STYLE_CLASS_VIEW);
     gtk_style_context_add_class(style, GTK_STYLE_CLASS_LINKED);
@@ -2245,9 +2253,8 @@ fsearch_list_view_set_selection_handlers(FsearchListView *view,
                                          FsearchListViewUnselectAllFunc unselect_func,
                                          FsearchListViewNumSelectedFunc num_selected_func,
                                          gpointer user_data) {
-    if (!view) {
-        return;
-    }
+    g_return_if_fail(FSEARCH_IS_LIST_VIEW(view));
+
     view->is_selected_func = is_selected_func;
     view->select_func = select_func;
     view->select_toggle_func = select_toggle_func;
@@ -2257,13 +2264,10 @@ fsearch_list_view_set_selection_handlers(FsearchListView *view,
     view->num_selected_func = num_selected_func;
     view->selection_user_data = user_data;
 
-    if (is_selected_func && select_func && select_toggle_func && unselect_func) {
-        view->has_selection_handlers = TRUE;
-    }
-    else {
-        view->has_selection_handlers = FALSE;
-    }
+    view->has_selection_handlers = TRUE;
 }
+
+
 
 gint
 fsearch_list_view_get_cursor(FsearchListView *view) {
