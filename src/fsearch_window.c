@@ -477,23 +477,33 @@ on_listview_drag_begin(GtkWidget *widget, GdkDragContext *context, gpointer user
         return;
     }
 
+    GtkWidget *icon = gtk_image_new_from_icon_name("text-x-generic", GTK_ICON_SIZE_DND);
+    GtkWidget *label;
+
     if (num_selected == 1) {
         GList *uris = NULL;
         db_view_selection_for_each(win->result_view->database_view, (GHFunc)add_uri_to_list, &uris);
         if (uris) {
             gchar *uri = uris->data;
             gchar *filename = g_filename_from_uri(uri, NULL, NULL);
-            GtkWidget *label = gtk_label_new(filename);
-            gtk_drag_set_icon_widget(context, label, 0, 0);
+            label = gtk_label_new(filename);
             g_free(filename);
             g_list_free_full(uris, g_free);
+        } else {
+            label = gtk_label_new("");
         }
     } else {
         char buf[32];
         sprintf(buf, "%d files", num_selected);
-        GtkWidget *label = gtk_label_new(buf);
-        gtk_drag_set_icon_widget(context, label, 0, 0);
+        label = gtk_label_new(buf);
     }
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_pack_start(GTK_BOX(box), icon, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(box), label, FALSE, FALSE, 0);
+    gtk_widget_show_all(box);
+
+    gtk_drag_set_icon_widget(context, box, -2, -2);
 }
 
 static void
