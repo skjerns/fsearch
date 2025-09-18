@@ -604,9 +604,8 @@ on_fsearch_list_view_row_activated(FsearchListView *view, FsearchDatabaseIndexTy
         return;
     }
 
-    FsearchConfig *config = fsearch_application_get_config(FSEARCH_APPLICATION_DEFAULT);
     int launch_folder = false;
-    if (config->double_click_path && col == DATABASE_INDEX_TYPE_PATH) {
+    if (col == DATABASE_INDEX_TYPE_PATH) {
         launch_folder = true;
     }
 
