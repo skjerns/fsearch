@@ -51,6 +51,7 @@ struct _FsearchApplication {
 
     char *option_search_term;
     bool new_window;
+    bool toggle;
 
     guint file_manager_watch_id;
     bool has_file_manager_on_bus;
@@ -708,10 +709,17 @@ fsearch_application_activate(GApplication *app) {
     g_assert(FSEARCH_IS_APPLICATION(app));
 
     FsearchApplication *self = FSEARCH_APPLICATION(app);
+    FsearchApplicationWindow *window = get_first_application_window(FSEARCH_APPLICATION(app));
+
+    if (self->toggle) {
+        if (window) {
+            gtk_window_close(GTK_WINDOW(window));
+            return;
+        }
+    }
 
     if (!self->new_window) {
         // If there's already a window make it visible
-        FsearchApplicationWindow *window = get_first_application_window(FSEARCH_APPLICATION(app));
         if (window) {
             move_search_term_to_window(self, window);
             fsearch_application_window_focus_search_entry(FSEARCH_APPLICATION_WINDOW(window));
@@ -743,6 +751,10 @@ fsearch_application_command_line(GApplication *app, GApplicationCommandLine *cmd
         self->new_window = true;
     }
 
+    if (g_variant_dict_contains(dict, "toggle")) {
+        self->toggle = true;
+    }
+
     if (g_variant_dict_contains(dict, "preferences")) {
         g_action_group_activate_action(G_ACTION_GROUP(self), "preferences", g_variant_new_uint32(0));
         return 0;
@@ -761,6 +773,7 @@ fsearch_application_command_line(GApplication *app, GApplicationCommandLine *cmd
 
     g_application_activate(G_APPLICATION(self));
     self->new_window = false;
+    self->toggle = false;
 
     return G_APPLICATION_CLASS(fsearch_application_parent_class)->command_line(app, cmdline);
 }
@@ -918,6 +931,7 @@ static void
 fsearch_application_add_option_entries(FsearchApplication *self) {
     static const GOptionEntry main_entries[] = {
         {"new-window", 0, 0, G_OPTION_ARG_NONE, NULL, N_("Open a new application window")},
+        {"toggle", 0, 0, G_OPTION_ARG_NONE, NULL, N_("Toggle main window")},
         {"preferences", 0, 0, G_OPTION_ARG_NONE, NULL, N_("Show the application preferences")},
         {"search", 's', 0, G_OPTION_ARG_STRING, NULL, N_("Set the search pattern"), "PATTERN"},
         {"update-database", 'u', 0, G_OPTION_ARG_NONE, NULL, N_("Update the database and exit")},
