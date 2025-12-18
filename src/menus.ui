@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <interface>
-    <requires lib="gtk+" version="3.18"/>
+    <requires lib="gtk+" version="3.22"/>
     <menu id="fsearch_main_menu">
         <submenu>
             <attribute name="label" translatable="yes">_File</attribute>
@@ -172,6 +172,10 @@
                 <attribute name="action">win.open</attribute>
                 <attribute name="accel">Return</attribute>
                 <attribute name="icon">document-open</attribute>
+            </item>
+            <item>
+                <attribute name="label">Open with Notepadqq</attribute>
+                <attribute name="action">win.open_with_notepadqq</attribute>
             </item>
             <submenu id="fsearch_listview_menu_open_with_submenu">
                 <attribute name="label" translatable="yes">Open _With</attribute>

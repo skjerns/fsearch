@@ -591,6 +591,16 @@ fsearch_window_action_open_folder(GSimpleAction *action, GVariant *variant, gpoi
 }
 
 static void
+fsearch_window_action_open_with_notepadqq(GSimpleAction *action, GVariant *variant, gpointer user_data) {
+    FsearchApplicationWindow *self = user_data;
+    g_autoptr(GString) error_message = g_string_sized_new(8192);
+    GList *paths = NULL;
+    fsearch_application_window_selection_for_each(self, (GHFunc)collect_selected_entry_path, &paths);
+    fsearch_file_utils_open_path_list_with_command(paths, "/usr/bin/notepadqq {path_full}", error_message);
+    g_list_free_full(paths, g_free);
+}
+
+static void
 fsearch_window_action_preview(GSimpleAction *action, GVariant *variant, gpointer user_data) {
     FsearchApplicationWindow *self = user_data;
     guint xid = 0;
@@ -855,6 +865,7 @@ static GActionEntry FsearchWindowActions[] = {
     {"open_with", fsearch_window_action_open_with, "s"},
     {"open_with_other", fsearch_window_action_open_with_other, "s"},
     {"open_folder", fsearch_window_action_open_folder},
+    {"open_with_notepadqq", fsearch_window_action_open_with_notepadqq},
     {"preview", fsearch_window_action_preview},
     {"close_window", fsearch_window_action_close_window},
     {"copy_clipboard", fsearch_window_action_copy},
@@ -922,6 +933,7 @@ fsearch_window_actions_update(FsearchApplicationWindow *self) {
     action_set_enabled(group, "open", num_rows_selected);
     action_set_enabled(group, "open_with", num_rows_selected >= 1 ? TRUE : FALSE);
     action_set_enabled(group, "open_with_other", num_rows_selected >= 1 ? TRUE : FALSE);
+    action_set_enabled(group, "open_with_notepadqq", num_rows_selected >= 1 ? TRUE : FALSE);
     action_set_enabled(group, "open_folder", num_rows_selected);
     action_set_enabled(group, "focus_search", TRUE);
     action_set_enabled(group, "toggle_focus", TRUE);
