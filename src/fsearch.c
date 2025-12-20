@@ -41,6 +41,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef GDK_WINDOWING_X11
+#include <gdk/gdkx.h>
+#endif
+
 struct _FsearchApplication {
     GtkApplication parent;
     FsearchDatabase *db;
@@ -51,7 +55,6 @@ struct _FsearchApplication {
 
     char *option_search_term;
     bool new_window;
-    bool toggle;
 
     guint file_manager_watch_id;
     bool has_file_manager_on_bus;
@@ -520,7 +523,11 @@ action_new_window_activated(GSimpleAction *action, GVariant *parameter, gpointer
     move_search_term_to_window(self, FSEARCH_APPLICATION_WINDOW(window));
     fsearch_application_window_focus_search_entry(FSEARCH_APPLICATION_WINDOW(window));
 
+#ifdef GDK_WINDOWING_X11
+    gtk_window_present_with_time(GTK_WINDOW(window), gdk_x11_get_server_time(gtk_widget_get_window(GTK_WIDGET(window))));
+#else
     gtk_window_present(window);
+#endif
 }
 
 static void
@@ -711,19 +718,16 @@ fsearch_application_activate(GApplication *app) {
     FsearchApplication *self = FSEARCH_APPLICATION(app);
     FsearchApplicationWindow *window = get_first_application_window(FSEARCH_APPLICATION(app));
 
-    if (self->toggle) {
-        if (window) {
-            gtk_window_close(GTK_WINDOW(window));
-            return;
-        }
-    }
-
     if (!self->new_window) {
         // If there's already a window make it visible
         if (window) {
             move_search_term_to_window(self, window);
             fsearch_application_window_focus_search_entry(FSEARCH_APPLICATION_WINDOW(window));
+#ifdef GDK_WINDOWING_X11
+            gtk_window_present_with_time(GTK_WINDOW(window), gdk_x11_get_server_time(gtk_widget_get_window(GTK_WIDGET(window))));
+#else
             gtk_window_present(GTK_WINDOW(window));
+#endif
             return;
         }
     }
@@ -752,7 +756,23 @@ fsearch_application_command_line(GApplication *app, GApplicationCommandLine *cmd
     }
 
     if (g_variant_dict_contains(dict, "toggle")) {
-        self->toggle = true;
+        FsearchApplicationWindow *window = get_first_application_window(self);
+
+        if (window) {
+            if (gtk_window_is_active(GTK_WINDOW(window))) {
+                gtk_window_close(GTK_WINDOW(window));
+            } else {
+#ifdef GDK_WINDOWING_X11
+                gtk_window_present_with_time(GTK_WINDOW(window), gdk_x11_get_server_time(gtk_widget_get_window(GTK_WIDGET(window))));
+#else
+                gtk_window_present(GTK_WINDOW(window));
+#endif
+            }
+        } else {
+            g_application_activate(G_APPLICATION(self));
+        }
+
+        return 0;
     }
 
     if (g_variant_dict_contains(dict, "preferences")) {
@@ -773,7 +793,6 @@ fsearch_application_command_line(GApplication *app, GApplicationCommandLine *cmd
 
     g_application_activate(G_APPLICATION(self));
     self->new_window = false;
-    self->toggle = false;
 
     return G_APPLICATION_CLASS(fsearch_application_parent_class)->command_line(app, cmdline);
 }
