@@ -762,11 +762,16 @@ fsearch_application_command_line(GApplication *app, GApplicationCommandLine *cmd
             if (gtk_window_is_active(GTK_WINDOW(window))) {
                 gtk_window_close(GTK_WINDOW(window));
             } else {
+                GtkEntry *entry = fsearch_application_window_get_search_entry(window);
+                if (entry) {
+                    gtk_entry_set_text(entry, "");
+                }
 #ifdef GDK_WINDOWING_X11
                 gtk_window_present_with_time(GTK_WINDOW(window), gdk_x11_get_server_time(gtk_widget_get_window(GTK_WIDGET(window))));
 #else
                 gtk_window_present(GTK_WINDOW(window));
 #endif
+                fsearch_application_window_focus_search_entry(window);
             }
         } else {
             g_application_activate(G_APPLICATION(self));
