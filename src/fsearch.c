@@ -34,6 +34,8 @@
 #include "icon_resources.h"
 #include "ui_resources.h"
 #include "fsearch_preview.h"
+#include "fsearch_tray.h"
+#include "fsearch_monitor.h"
 #include <glib.h>
 #include <glib/gi18n.h>
 #include <limits.h>
@@ -67,6 +69,9 @@ struct _FsearchApplication {
     GMutex mutex;
 
     bool is_shutting_down;
+
+    FsearchTray *tray;
+    FsearchMonitor *monitor;
 };
 
 static const char *fsearch_bus_name = "io.github.cboxdoerfer.FSearch";
@@ -198,6 +203,17 @@ on_database_update_finished(gpointer user_data) {
         action_set_enabled("cancel_update_database", FALSE);
     }
     fsearch_application_state_unlock(self);
+
+    // Start inotify monitor for the new database
+    if (self->db) {
+        g_clear_pointer(&self->monitor, fsearch_monitor_free);
+        self->monitor = fsearch_monitor_new(self->db);
+        if (self->monitor) {
+            fsearch_monitor_watch_database_folders(self->monitor);
+            fsearch_monitor_start(self->monitor);
+        }
+    }
+
     g_signal_emit(self, fsearch_signals[FSEARCH_SIGNAL_DATABASE_UPDATE_FINISHED], 0);
     return G_SOURCE_REMOVE;
 }
@@ -355,6 +371,26 @@ get_first_application_window(FsearchApplication *app) {
     }
 
     return FSEARCH_APPLICATION_WINDOW(windows->data);
+}
+
+static void
+fsearch_application_toggle_window(FsearchApplication *self) {
+    FsearchApplicationWindow *window = get_first_application_window(self);
+    if (!window) {
+        g_application_activate(G_APPLICATION(self));
+        return;
+    }
+    if (gtk_widget_get_visible(GTK_WIDGET(window)) && gtk_window_is_active(GTK_WINDOW(window))) {
+        gtk_widget_hide(GTK_WIDGET(window));
+    } else {
+        gtk_widget_show(GTK_WIDGET(window));
+#ifdef GDK_WINDOWING_X11
+        gtk_window_present_with_time(GTK_WINDOW(window), gdk_x11_get_server_time(gtk_widget_get_window(GTK_WIDGET(window))));
+#else
+        gtk_window_present(GTK_WINDOW(window));
+#endif
+        fsearch_application_window_focus_search_entry(window);
+    }
 }
 
 static GString *
@@ -545,12 +581,19 @@ fsearch_application_shutdown(GApplication *app) {
     FsearchApplication *fsearch = FSEARCH_APPLICATION(app);
 
     GList *windows = gtk_application_get_windows(GTK_APPLICATION(app));
-    for (; windows; windows = windows->next) {
-        GtkWindow *window = windows->data;
+    for (GList *l = windows; l; l = l->next) {
+        GtkWindow *window = l->data;
         if (FSEARCH_IS_APPLICATION_WINDOW(window)) {
             fsearch_application_window_prepare_shutdown(window);
         }
     }
+    // Destroy all windows during actual quit
+    while ((windows = gtk_application_get_windows(GTK_APPLICATION(app))) != NULL) {
+        gtk_widget_destroy(GTK_WIDGET(windows->data));
+    }
+
+    // Stop inotify monitor before anything else
+    g_clear_pointer(&fsearch->monitor, fsearch_monitor_free);
 
     if (fsearch->file_manager_watch_id) {
         g_bus_unwatch_name(fsearch->file_manager_watch_id);
@@ -567,6 +610,8 @@ fsearch_application_shutdown(GApplication *app) {
 
     // close the preview
     fsearch_preview_call_close();
+
+    g_clear_pointer(&fsearch->tray, fsearch_tray_free);
 
     g_clear_pointer(&fsearch->db, db_unref);
     g_clear_object(&fsearch->db_thread_cancellable);
@@ -690,6 +735,10 @@ fsearch_application_startup(GApplication *app) {
 
     fsearch->db_pool = g_thread_pool_new(database_pool_func, app, 1, TRUE, NULL);
     fsearch->is_shutting_down = false;
+
+    g_application_hold(G_APPLICATION(app));
+
+    fsearch->tray = fsearch_tray_new(fsearch);
 }
 
 static GActionEntry fsearch_app_entries[] = {
@@ -721,6 +770,7 @@ fsearch_application_activate(GApplication *app) {
     if (!self->new_window) {
         // If there's already a window make it visible
         if (window) {
+            gtk_widget_show(GTK_WIDGET(window));
             move_search_term_to_window(self, window);
             fsearch_application_window_focus_search_entry(FSEARCH_APPLICATION_WINDOW(window));
 #ifdef GDK_WINDOWING_X11
@@ -756,27 +806,7 @@ fsearch_application_command_line(GApplication *app, GApplicationCommandLine *cmd
     }
 
     if (g_variant_dict_contains(dict, "toggle")) {
-        FsearchApplicationWindow *window = get_first_application_window(self);
-
-        if (window) {
-            if (gtk_window_is_active(GTK_WINDOW(window))) {
-                gtk_window_close(GTK_WINDOW(window));
-            } else {
-                GtkEntry *entry = fsearch_application_window_get_search_entry(window);
-                if (entry) {
-                    gtk_entry_set_text(entry, "");
-                }
-#ifdef GDK_WINDOWING_X11
-                gtk_window_present_with_time(GTK_WINDOW(window), gdk_x11_get_server_time(gtk_widget_get_window(GTK_WIDGET(window))));
-#else
-                gtk_window_present(GTK_WINDOW(window));
-#endif
-                fsearch_application_window_focus_search_entry(window);
-            }
-        } else {
-            g_application_activate(G_APPLICATION(self));
-        }
-
+        fsearch_application_toggle_window(self);
         return 0;
     }
 
@@ -794,6 +824,25 @@ fsearch_application_command_line(GApplication *app, GApplicationCommandLine *cmd
     if (g_variant_dict_lookup(dict, "search", "&s", &search_term)) {
         g_clear_pointer(&self->option_search_term, g_free);
         self->option_search_term = g_strdup(search_term);
+    }
+
+    if (g_variant_dict_contains(dict, "hidden")) {
+        // Don't show window, just return
+        // Ensure database is loaded
+        if (!get_first_application_window(self)) {
+            g_action_group_activate_action(G_ACTION_GROUP(self), "new_window", NULL);
+            FsearchApplicationWindow *win = get_first_application_window(self);
+            if (win) {
+                gtk_widget_hide(GTK_WIDGET(win));
+            }
+            database_auto_update_init(self);
+            g_cancellable_reset(self->db_thread_cancellable);
+            database_scan_or_load_enqueue(FSEARCH_DATABASE_ACTION_LOAD);
+            if (self->config->update_database_on_launch) {
+                database_scan_or_load_enqueue(FSEARCH_DATABASE_ACTION_SCAN);
+            }
+        }
+        return 0;
     }
 
     g_application_activate(G_APPLICATION(self));
@@ -960,6 +1009,7 @@ fsearch_application_add_option_entries(FsearchApplication *self) {
         {"search", 's', 0, G_OPTION_ARG_STRING, NULL, N_("Set the search pattern"), "PATTERN"},
         {"update-database", 'u', 0, G_OPTION_ARG_NONE, NULL, N_("Update the database and exit")},
         {"version", 'v', 0, G_OPTION_ARG_NONE, NULL, N_("Print version information and exit")},
+        {"hidden", 0, 0, G_OPTION_ARG_NONE, NULL, N_("Start with the main window hidden")},
         {NULL}};
 
     g_assert(FSEARCH_IS_APPLICATION(self));

@@ -726,7 +726,12 @@ fsearch_query_parser_parse_expression(FsearchQueryParseContext *parse_ctx, bool 
             }
             break;
         case FSEARCH_QUERY_TOKEN_WORD:
-            to_append = parse_word(token_value, flags);
+            if (fsearch_query_lexer_last_token_was_quoted(parse_ctx->lexer)) {
+                to_append = parse_word(token_value, flags | QUERY_FLAG_EXACT_MATCH);
+            }
+            else {
+                to_append = parse_word(token_value, flags);
+            }
             break;
         case FSEARCH_QUERY_TOKEN_FIELD:
             to_append = parse_field(parse_ctx, token_value, false, flags);

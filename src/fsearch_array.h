@@ -80,3 +80,13 @@ darray_ref(DynamicArray *array);
 
 DynamicArray *
 darray_copy(DynamicArray *array);
+
+void
+darray_remove_item_at(DynamicArray *array, uint32_t idx);
+
+void
+darray_insert_item_at(DynamicArray *array, uint32_t idx, void *data);
+
+uint32_t
+darray_binary_search_insert_pos(DynamicArray *array, void *item,
+                                 DynamicArrayCompareDataFunc comp_func, void *data);

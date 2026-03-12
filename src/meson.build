@@ -52,6 +52,8 @@ libfsearch_sources = [
     'fsearch_window.c',
     'fsearch_window_actions.c',
     'fsearch_preview.c',
+    'fsearch_tray.c',
+    'fsearch_monitor.c',
 ]
 
 if build_machine.system()=='darwin'
@@ -65,6 +67,10 @@ fsearch_deps = [
     dependency('libpcre2-8', version: '>= 10.21'),
     dependency('icu-uc', version: '>= 3.8'),
 ]
+
+if ayatana_dep.found()
+    fsearch_deps += ayatana_dep
+endif
 
 libfsearch = static_library(
     'fsearch',

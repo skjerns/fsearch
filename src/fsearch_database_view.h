@@ -51,6 +51,9 @@ void
 db_view_set_query_flags(FsearchDatabaseView *view, FsearchQueryFlags query_flags);
 
 void
+db_view_refresh(FsearchDatabaseView *view);
+
+void
 db_view_set_query_text(FsearchDatabaseView *view, const char *query_text);
 
 void

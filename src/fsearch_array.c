@@ -495,6 +495,56 @@ darray_binary_search_with_data(DynamicArray *array,
     return result;
 }
 
+void
+darray_remove_item_at(DynamicArray *array, uint32_t idx) {
+    g_assert(array);
+    g_assert(idx < array->num_items);
+
+    memmove(&array->data[idx], &array->data[idx + 1], (array->num_items - idx - 1) * sizeof(void *));
+    array->num_items--;
+}
+
+void
+darray_insert_item_at(DynamicArray *array, uint32_t idx, void *data) {
+    g_assert(array);
+    g_assert(idx <= array->num_items);
+
+    if (array->num_items >= array->max_items) {
+        darray_expand(array, array->num_items + 1);
+    }
+
+    memmove(&array->data[idx + 1], &array->data[idx], (array->num_items - idx) * sizeof(void *));
+    array->data[idx] = data;
+    array->num_items++;
+}
+
+uint32_t
+darray_binary_search_insert_pos(DynamicArray *array, void *item,
+                                 DynamicArrayCompareDataFunc comp_func, void *data) {
+    g_assert(array);
+    g_assert(comp_func);
+
+    if (array->num_items == 0) {
+        return 0;
+    }
+
+    uint32_t left = 0;
+    uint32_t right = array->num_items;
+
+    while (left < right) {
+        uint32_t middle = left + (right - left) / 2;
+        int32_t result = comp_func(&array->data[middle], &item, data);
+        if (result < 0) {
+            left = middle + 1;
+        }
+        else {
+            right = middle;
+        }
+    }
+
+    return left;
+}
+
 DynamicArray *
 darray_copy(DynamicArray *array) {
     if (!array) {

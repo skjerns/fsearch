@@ -9,6 +9,7 @@ struct FsearchQueryLexer {
     GQueue *char_stack;
 
     uint32_t input_pos;
+    bool last_token_was_quoted;
 };
 
 static const char *reserved_chars = ":=<>()";
@@ -64,9 +65,15 @@ parse_quoted_string(FsearchQueryLexer *lexer, GString *string) {
     }
 }
 
+bool
+fsearch_query_lexer_last_token_was_quoted(FsearchQueryLexer *lexer) {
+    return lexer->last_token_was_quoted;
+}
+
 FsearchQueryToken
 fsearch_query_lexer_get_next_token(FsearchQueryLexer *lexer, GString **result) {
     FsearchQueryToken token = FSEARCH_QUERY_TOKEN_NONE;
+    lexer->last_token_was_quoted = false;
 
     char c = '\0';
 
@@ -115,6 +122,8 @@ fsearch_query_lexer_get_next_token(FsearchQueryLexer *lexer, GString **result) {
 
     // Other chars start a term or field name or reserved word
     g_autoptr(GString) token_value = g_string_sized_new(1024);
+    bool starts_with_quote = false;
+    bool only_quoted_content = true;
 
     while ((c = get_next_char(lexer))) {
         if (g_ascii_isspace(c)) {
@@ -122,12 +131,16 @@ fsearch_query_lexer_get_next_token(FsearchQueryLexer *lexer, GString **result) {
             break;
         }
         else if (c == '"') {
+            if (token_value->len == 0) {
+                starts_with_quote = true;
+            }
             parse_quoted_string(lexer, token_value);
         }
         else if (c == '\\') {
             // escape: get next char
             c = get_next_char(lexer);
             g_string_append_c(token_value, c);
+            only_quoted_content = false;
         }
         else if (strchr(reserved_chars, c)) {
             if (c == ':') {
@@ -148,8 +161,11 @@ fsearch_query_lexer_get_next_token(FsearchQueryLexer *lexer, GString **result) {
         }
         else {
             g_string_append_c(token_value, c);
+            only_quoted_content = false;
         }
     }
+
+    lexer->last_token_was_quoted = starts_with_quote && only_quoted_content && token_value->len > 0;
 
     if (!strcmp(token_value->str, "NOT")) {
         return FSEARCH_QUERY_TOKEN_NOT;

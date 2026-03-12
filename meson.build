@@ -1,5 +1,5 @@
 project('fsearch', 'c',
-    version: '0.3.alpha0',
+    version: '0.4.alpha0',
     meson_version: '>= 0.45.0',
     default_options: ['c_std=gnu11',
                       'channel=other',
@@ -14,8 +14,11 @@ i18n = import('i18n')
 
 have_malloc_trim = meson.get_compiler('c').has_function('malloc_trim')
 
+ayatana_dep = dependency('ayatana-appindicator3-0.1', required: false)
+
 config_h = configuration_data()
 config_h.set('HAVE_MALLOC_TRIM', have_malloc_trim)
+config_h.set('HAVE_AYATANA_APPINDICATOR', ayatana_dep.found())
 config_h.set_quoted('APP_ID', app_id)
 config_h.set_quoted('PACKAGE_VERSION', meson.project_version())
 config_h.set_quoted('VERSION', meson.project_version())

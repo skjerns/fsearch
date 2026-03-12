@@ -998,9 +998,7 @@ on_search_entry_activate(GtkButton *widget, gpointer user_data) {
 
 static gboolean
 on_fsearch_window_delete_event(GtkWidget *widget, GdkEvent *event, gpointer user_data) {
-    FsearchApplicationWindow *win = FSEARCH_APPLICATION_WINDOW(widget);
-    fsearch_application_window_prepare_shutdown(win);
-    g_clear_pointer(&widget, gtk_widget_destroy);
+    gtk_widget_hide(widget);
     return TRUE;
 }
 

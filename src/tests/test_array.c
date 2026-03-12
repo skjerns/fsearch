@@ -183,11 +183,92 @@ test_search(void) {
     same_elements();
 }
 
+static void
+test_insert_remove(void) {
+    DynamicArray *array = darray_new(10);
+
+    // Insert items maintaining ascending order
+    for (int32_t i = 0; i < 10; i += 2) {
+        uint32_t pos = darray_binary_search_insert_pos(array, GINT_TO_POINTER(i),
+                                                        (DynamicArrayCompareDataFunc)sort_int_ascending, NULL);
+        darray_insert_item_at(array, pos, GINT_TO_POINTER(i));
+    }
+    // array should be: 0, 2, 4, 6, 8
+    g_assert_true(darray_get_num_items(array) == 5);
+
+    // Insert odd numbers
+    for (int32_t i = 1; i < 10; i += 2) {
+        uint32_t pos = darray_binary_search_insert_pos(array, GINT_TO_POINTER(i),
+                                                        (DynamicArrayCompareDataFunc)sort_int_ascending, NULL);
+        darray_insert_item_at(array, pos, GINT_TO_POINTER(i));
+    }
+    // array should be: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+    g_assert_true(darray_get_num_items(array) == 10);
+    for (int32_t i = 0; i < 10; i++) {
+        g_assert_true(GPOINTER_TO_INT(darray_get_item(array, i)) == i);
+    }
+
+    // Remove item at index 5 (value 5)
+    darray_remove_item_at(array, 5);
+    g_assert_true(darray_get_num_items(array) == 9);
+    g_assert_true(GPOINTER_TO_INT(darray_get_item(array, 5)) == 6);
+
+    // Remove first item
+    darray_remove_item_at(array, 0);
+    g_assert_true(darray_get_num_items(array) == 8);
+    g_assert_true(GPOINTER_TO_INT(darray_get_item(array, 0)) == 1);
+
+    // Remove last item
+    darray_remove_item_at(array, darray_get_num_items(array) - 1);
+    g_assert_true(darray_get_num_items(array) == 7);
+
+    g_clear_pointer(&array, darray_unref);
+}
+
+static void
+test_binary_search_insert_pos(void) {
+    DynamicArray *array = darray_new(10);
+
+    // Empty array
+    uint32_t pos = darray_binary_search_insert_pos(array, GINT_TO_POINTER(5),
+                                                    (DynamicArrayCompareDataFunc)sort_int_ascending, NULL);
+    g_assert_true(pos == 0);
+
+    // Build sorted array: 10, 20, 30, 40, 50
+    for (int32_t i = 1; i <= 5; i++) {
+        darray_add_item(array, GINT_TO_POINTER(i * 10));
+    }
+
+    // Insert at beginning
+    pos = darray_binary_search_insert_pos(array, GINT_TO_POINTER(5),
+                                           (DynamicArrayCompareDataFunc)sort_int_ascending, NULL);
+    g_assert_true(pos == 0);
+
+    // Insert in middle
+    pos = darray_binary_search_insert_pos(array, GINT_TO_POINTER(25),
+                                           (DynamicArrayCompareDataFunc)sort_int_ascending, NULL);
+    g_assert_true(pos == 2);
+
+    // Insert at end
+    pos = darray_binary_search_insert_pos(array, GINT_TO_POINTER(55),
+                                           (DynamicArrayCompareDataFunc)sort_int_ascending, NULL);
+    g_assert_true(pos == 5);
+
+    // Insert duplicate value - should find existing position
+    pos = darray_binary_search_insert_pos(array, GINT_TO_POINTER(30),
+                                           (DynamicArrayCompareDataFunc)sort_int_ascending, NULL);
+    g_assert_true(pos == 2);  // at or before existing 30
+
+    g_clear_pointer(&array, darray_unref);
+}
+
 int
 main(int argc, char *argv[]) {
     g_test_init(&argc, &argv, NULL);
     g_test_add_func("/FSearch/array/main", test_main);
     g_test_add_func("/FSearch/array/sort", test_sort);
     g_test_add_func("/FSearch/array/search", test_search);
+    g_test_add_func("/FSearch/array/insert_remove", test_insert_remove);
+    g_test_add_func("/FSearch/array/binary_search_insert_pos", test_binary_search_insert_pos);
     return g_test_run();
 }

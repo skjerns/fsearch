@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glib.h>
+#include <stdbool.h>
 
 typedef enum FsearchQueryToken {
     FSEARCH_QUERY_TOKEN_NONE,
@@ -35,3 +36,6 @@ fsearch_query_lexer_peek_next_token(FsearchQueryLexer *lexer, GString **result);
 
 FsearchQueryToken
 fsearch_query_lexer_get_next_token(FsearchQueryLexer *lexer, GString **result);
+
+bool
+fsearch_query_lexer_last_token_was_quoted(FsearchQueryLexer *lexer);

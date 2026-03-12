@@ -19,6 +19,7 @@
 #pragma once
 
 #include "fsearch_array.h"
+#include "fsearch_database_entry.h"
 #include "fsearch_database_index.h"
 #include "fsearch_thread_pool.h"
 
@@ -110,3 +111,30 @@ db_get_folders_sorted(FsearchDatabase *db, FsearchDatabaseIndexType sort_type);
 
 DynamicArray *
 db_get_files_sorted(FsearchDatabase *db, FsearchDatabaseIndexType sort_type);
+
+void
+db_read_lock(FsearchDatabase *db);
+
+void
+db_read_unlock(FsearchDatabase *db);
+
+FsearchDatabaseEntry *
+db_alloc_file_entry(FsearchDatabase *db);
+
+FsearchDatabaseEntry *
+db_alloc_folder_entry(FsearchDatabase *db);
+
+void
+db_insert_file_entry(FsearchDatabase *db, FsearchDatabaseEntry *entry);
+
+void
+db_insert_folder_entry(FsearchDatabase *db, FsearchDatabaseEntry *entry);
+
+void
+db_remove_file_entry(FsearchDatabase *db, FsearchDatabaseEntry *entry);
+
+void
+db_remove_folder_entry(FsearchDatabase *db, FsearchDatabaseEntry *entry);
+
+void
+db_notify_views_content_changed(FsearchDatabase *db);

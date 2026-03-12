@@ -44,6 +44,7 @@
 
 #include "fsearch_database.h"
 #include "fsearch_database_entry.h"
+#include "fsearch_database_view.h"
 #include "fsearch_exclude_path.h"
 #include "fsearch_index.h"
 #include "fsearch_memory_pool.h"
@@ -76,7 +77,7 @@ struct FsearchDatabase {
 
     volatile int ref_count;
 
-    GMutex mutex;
+    GRWLock rw_lock;
 };
 
 enum {
@@ -1373,11 +1374,126 @@ compare_exclude_path(FsearchExcludePath *p1, FsearchExcludePath *p2) {
     return strcmp(p1->path, p2->path);
 }
 
+static DynamicArrayCompareDataFunc
+get_compare_func_for_index_type(FsearchDatabaseIndexType type) {
+    switch (type) {
+    case DATABASE_INDEX_TYPE_NAME:
+        return (DynamicArrayCompareDataFunc)db_entry_compare_entries_by_name;
+    case DATABASE_INDEX_TYPE_PATH:
+        return (DynamicArrayCompareDataFunc)db_entry_compare_entries_by_path;
+    case DATABASE_INDEX_TYPE_SIZE:
+        return (DynamicArrayCompareDataFunc)db_entry_compare_entries_by_size;
+    case DATABASE_INDEX_TYPE_MODIFICATION_TIME:
+        return (DynamicArrayCompareDataFunc)db_entry_compare_entries_by_modification_time;
+    case DATABASE_INDEX_TYPE_EXTENSION:
+        return (DynamicArrayCompareDataFunc)db_entry_compare_entries_by_extension;
+    case DATABASE_INDEX_TYPE_FILETYPE:
+        return (DynamicArrayCompareDataFunc)db_entry_compare_entries_by_type;
+    default:
+        return NULL;
+    }
+}
+
+static void
+db_insert_entry_into_sorted_arrays(DynamicArray **sorted_arrays, FsearchDatabaseEntry *entry) {
+    for (uint32_t i = 0; i < NUM_DATABASE_INDEX_TYPES; i++) {
+        DynamicArray *array = sorted_arrays[i];
+        if (!array) {
+            continue;
+        }
+        DynamicArrayCompareDataFunc comp = get_compare_func_for_index_type(i);
+        if (!comp) {
+            continue;
+        }
+        uint32_t pos = darray_binary_search_insert_pos(array, entry, comp, NULL);
+        darray_insert_item_at(array, pos, entry);
+    }
+}
+
+static void
+db_remove_entry_from_sorted_arrays(DynamicArray **sorted_arrays, FsearchDatabaseEntry *entry) {
+    for (uint32_t i = 0; i < NUM_DATABASE_INDEX_TYPES; i++) {
+        DynamicArray *array = sorted_arrays[i];
+        if (!array) {
+            continue;
+        }
+        // Linear scan to find the exact pointer
+        uint32_t num = darray_get_num_items(array);
+        for (uint32_t j = 0; j < num; j++) {
+            if (darray_get_item(array, j) == entry) {
+                darray_remove_item_at(array, j);
+                break;
+            }
+        }
+    }
+}
+
+void
+db_insert_file_entry(FsearchDatabase *db, FsearchDatabaseEntry *entry) {
+    g_assert(db);
+    g_assert(entry);
+    db_insert_entry_into_sorted_arrays(db->sorted_files, entry);
+}
+
+void
+db_insert_folder_entry(FsearchDatabase *db, FsearchDatabaseEntry *entry) {
+    g_assert(db);
+    g_assert(entry);
+    db_insert_entry_into_sorted_arrays(db->sorted_folders, entry);
+}
+
+void
+db_remove_file_entry(FsearchDatabase *db, FsearchDatabaseEntry *entry) {
+    g_assert(db);
+    g_assert(entry);
+    db_remove_entry_from_sorted_arrays(db->sorted_files, entry);
+}
+
+void
+db_remove_folder_entry(FsearchDatabase *db, FsearchDatabaseEntry *entry) {
+    g_assert(db);
+    g_assert(entry);
+    db_remove_entry_from_sorted_arrays(db->sorted_folders, entry);
+}
+
+FsearchDatabaseEntry *
+db_alloc_file_entry(FsearchDatabase *db) {
+    g_assert(db);
+    FsearchDatabaseEntry *entry = fsearch_memory_pool_malloc(db->file_pool);
+    db_entry_set_type(entry, DATABASE_ENTRY_TYPE_FILE);
+    return entry;
+}
+
+FsearchDatabaseEntry *
+db_alloc_folder_entry(FsearchDatabase *db) {
+    g_assert(db);
+    FsearchDatabaseEntry *entry = fsearch_memory_pool_malloc(db->folder_pool);
+    db_entry_set_type(entry, DATABASE_ENTRY_TYPE_FOLDER);
+    return entry;
+}
+
+static gboolean
+db_notify_views_content_changed_idle(gpointer user_data) {
+    FsearchDatabase *db = user_data;
+    for (GList *l = db->db_views; l; l = l->next) {
+        db_view_refresh(l->data);
+    }
+    db_unref(db);
+    return G_SOURCE_REMOVE;
+}
+
+void
+db_notify_views_content_changed(FsearchDatabase *db) {
+    g_assert(db);
+    g_debug("[db] notifying %d views of content change", g_list_length(db->db_views));
+    g_idle_add(db_notify_views_content_changed_idle, db_ref(db));
+}
+
 FsearchDatabase *
 db_new(GList *indexes, GList *excludes, char **exclude_files, bool exclude_hidden) {
     FsearchDatabase *db = g_new0(FsearchDatabase, 1);
     g_assert(db);
-    g_mutex_init(&db->mutex);
+    g_rw_lock_init(&db->rw_lock);
     if (indexes) {
         db->indexes = g_list_copy_deep(indexes, (GCopyFunc)fsearch_index_copy, NULL);
 
@@ -1436,7 +1552,7 @@ db_free(FsearchDatabase *db) {
 
     db_unlock(db);
 
-    g_mutex_clear(&db->mutex);
+    g_rw_lock_clear(&db->rw_lock);
 
     g_clear_pointer(&db, free);
 
@@ -1477,19 +1593,31 @@ db_get_num_entries(FsearchDatabase *db) {
 void
 db_unlock(FsearchDatabase *db) {
     g_assert(db);
-    g_mutex_unlock(&db->mutex);
+    g_rw_lock_writer_unlock(&db->rw_lock);
 }
 
 void
 db_lock(FsearchDatabase *db) {
     g_assert(db);
-    g_mutex_lock(&db->mutex);
+    g_rw_lock_writer_lock(&db->rw_lock);
 }
 
 bool
 db_try_lock(FsearchDatabase *db) {
     g_assert(db);
-    return g_mutex_trylock(&db->mutex);
+    return g_rw_lock_writer_trylock(&db->rw_lock);
+}
+
+void
+db_read_lock(FsearchDatabase *db) {
+    g_assert(db);
+    g_rw_lock_reader_lock(&db->rw_lock);
+}
+
+void
+db_read_unlock(FsearchDatabase *db) {
+    g_assert(db);
+    g_rw_lock_reader_unlock(&db->rw_lock);
 }
 
 static bool

@@ -690,6 +690,16 @@ db_view_set_query_flags(FsearchDatabaseView *view, FsearchQueryFlags query_flags
 }
 
 void
+db_view_refresh(FsearchDatabaseView *view) {
+    if (!view) {
+        return;
+    }
+    db_view_lock(view);
+    db_view_search(view, false);
+    db_view_unlock(view);
+}
+
+void
 db_view_set_query_text(FsearchDatabaseView *view, const char *query_text) {
     if (!view) {
         return;
