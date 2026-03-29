@@ -148,7 +148,15 @@ scan_new_dir(FsearchMonitor *mon, const char *dir_path, FsearchDatabaseEntry *pa
         }
 
         struct stat st;
-        if (stat(child_path, &st) != 0) {
+        // Use lstat to avoid following symlinks, which could cause infinite
+        // recursion if a symlink points to a parent directory.
+        if (lstat(child_path, &st) != 0) {
+            g_free(child_path);
+            continue;
+        }
+
+        // Skip symlinks — index the link entry itself but don't recurse
+        if (S_ISLNK(st.st_mode)) {
             g_free(child_path);
             continue;
         }
@@ -225,6 +233,10 @@ static gboolean
 apply_batch_idle(gpointer user_data) {
     FsearchMonitor *mon = user_data;
 
+    // Hold batch_mutex for the entire batch application to synchronize
+    // hash table access (wd_to_path, path_to_wd, path_to_entry) with
+    // the monitor thread.  The monitor thread will briefly block on the
+    // mutex while we process, but inotify events buffer in the kernel.
     g_mutex_lock(&mon->batch_mutex);
     GQueue *events = mon->pending_events;
     mon->pending_events = g_queue_new();
@@ -240,9 +252,9 @@ apply_batch_idle(gpointer user_data) {
         g_queue_push_tail(events, orphan);
         g_hash_table_iter_steal(&iter);
     }
-    g_mutex_unlock(&mon->batch_mutex);
 
     if (g_queue_is_empty(events)) {
+        g_mutex_unlock(&mon->batch_mutex);
         g_queue_free(events);
         return G_SOURCE_REMOVE;
     }
@@ -271,6 +283,11 @@ apply_batch_idle(gpointer user_data) {
             }
             // Multiple MODIFY = keep one
             if (existing->type == MONITOR_EVENT_MODIFY && event->type == MONITOR_EVENT_MODIFY) {
+                monitor_event_free(event);
+                continue;
+            }
+            // CREATE then MODIFY = keep as CREATE (stat in CREATE handler picks up latest state)
+            if (existing->type == MONITOR_EVENT_CREATE && event->type == MONITOR_EVENT_MODIFY) {
                 monitor_event_free(event);
                 continue;
             }
@@ -470,6 +487,8 @@ apply_batch_idle(gpointer user_data) {
     db_unlock(mon->db);
     g_queue_free(coalesced);
 
+    g_mutex_unlock(&mon->batch_mutex);
+
     db_notify_views_content_changed(mon->db);
 
     return G_SOURCE_REMOVE;
@@ -497,30 +516,33 @@ process_inotify_event(FsearchMonitor *mon, const struct inotify_event *event) {
         return;
     }
 
+    // Hold batch_mutex for the entire event processing to synchronize
+    // wd_to_path lookups with modifications from apply_batch_idle on
+    // the main thread.
+    g_mutex_lock(&mon->batch_mutex);
+
     if (!event->len) {
         // Events without a name (e.g. IN_DELETE_SELF on the watched dir itself)
         if (event->mask & (IN_DELETE_SELF | IN_MOVE_SELF)) {
             char *dir_path = g_hash_table_lookup(mon->wd_to_path, GINT_TO_POINTER(event->wd));
             if (dir_path) {
-                g_mutex_lock(&mon->batch_mutex);
                 MonitorEvent *me = monitor_event_new(MONITOR_EVENT_DELETE, dir_path, TRUE);
                 g_queue_push_tail(mon->pending_events, me);
                 schedule_batch_apply(mon);
-                g_mutex_unlock(&mon->batch_mutex);
             }
         }
+        g_mutex_unlock(&mon->batch_mutex);
         return;
     }
 
     char *dir_path = g_hash_table_lookup(mon->wd_to_path, GINT_TO_POINTER(event->wd));
     if (!dir_path) {
+        g_mutex_unlock(&mon->batch_mutex);
         return;
     }
 
     char *full_path = g_build_filename(dir_path, event->name, NULL);
     gboolean is_dir = (event->mask & IN_ISDIR) != 0;
-
-    g_mutex_lock(&mon->batch_mutex);
 
     if (event->mask & IN_CREATE) {
         MonitorEvent *me = monitor_event_new(MONITOR_EVENT_CREATE, full_path, is_dir);
@@ -616,10 +638,9 @@ monitor_thread_func(gpointer data) {
             while ((ev = g_queue_pop_head(mon->pending_events)) != NULL) {
                 monitor_event_free(ev);
             }
-            if (mon->batch_timeout_id) {
-                g_source_remove(mon->batch_timeout_id);
-                mon->batch_timeout_id = 0;
-            }
+            // Don't call g_source_remove here — it's not thread-safe.
+            // The pending batch_timeout will fire on the main thread and
+            // find an empty queue, which is a harmless no-op.
             g_mutex_unlock(&mon->batch_mutex);
             g_idle_add(trigger_rescan_idle, NULL);
             g_debug("[monitor] overflow detected, full rescan scheduled");
