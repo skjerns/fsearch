@@ -23,6 +23,7 @@
 #include "fsearch_database_entry.h"
 
 #include <errno.h>
+#include <gio/gio.h>
 #include <glib.h>
 #include <poll.h>
 #include <string.h>
@@ -55,6 +56,7 @@ struct FsearchMonitor {
     GHashTable *path_to_entry;    // char* full path -> FsearchDatabaseEntry*
     GThread *thread;
     volatile gboolean running;
+    volatile gboolean needs_rescan;
     FsearchDatabase *db;
     GQueue *pending_events;
     GMutex batch_mutex;
@@ -62,6 +64,9 @@ struct FsearchMonitor {
 
     // For move coalescing
     GHashTable *pending_moves;    // uint32_t cookie -> MonitorEvent* (MOVED_FROM waiting for MOVED_TO)
+
+    // Resume detection
+    guint sleep_subscription_id;
 };
 
 static void
@@ -118,6 +123,68 @@ build_path_to_entry_map(FsearchMonitor *mon) {
         }
         darray_unref(files);
     }
+}
+
+static void add_watch_for_dir(FsearchMonitor *mon, const char *dir_path);
+
+// Scan the contents of a newly-watched directory and insert any entries that
+// are not yet in the database.  Called after add_watch_for_dir() so that files
+// created between the mkdir and the watch being established are not missed.
+static void
+scan_new_dir(FsearchMonitor *mon, const char *dir_path, FsearchDatabaseEntry *parent_entry) {
+    GDir *dir = g_dir_open(dir_path, 0, NULL);
+    if (!dir) {
+        return;
+    }
+
+    const char *child_name;
+    while ((child_name = g_dir_read_name(dir)) != NULL) {
+        char *child_path = g_build_filename(dir_path, child_name, NULL);
+
+        // Skip entries we already know about (e.g. arrived via inotify in the same batch)
+        if (g_hash_table_contains(mon->path_to_entry, child_path)) {
+            g_free(child_path);
+            continue;
+        }
+
+        struct stat st;
+        if (stat(child_path, &st) != 0) {
+            g_free(child_path);
+            continue;
+        }
+
+        if (S_ISDIR(st.st_mode)) {
+            FsearchDatabaseEntry *entry = db_alloc_folder_entry(mon->db);
+            db_entry_set_name(entry, child_name);
+            db_entry_set_mtime(entry, st.st_mtime);
+            if (parent_entry) {
+                db_entry_set_parent(entry, (FsearchDatabaseEntryFolder *)parent_entry);
+            }
+            db_insert_folder_entry(mon->db, entry);
+            g_hash_table_insert(mon->path_to_entry, g_strdup(child_path), entry);
+
+            add_watch_for_dir(mon, child_path);
+            scan_new_dir(mon, child_path, entry);
+
+            g_debug("[monitor] scan_new_dir: found subdir %s", child_path);
+        } else {
+            FsearchDatabaseEntry *entry = db_alloc_file_entry(mon->db);
+            db_entry_set_name(entry, child_name);
+            db_entry_set_size(entry, st.st_size);
+            db_entry_set_mtime(entry, st.st_mtime);
+            if (parent_entry) {
+                db_entry_set_parent(entry, (FsearchDatabaseEntryFolder *)parent_entry);
+            }
+            db_insert_file_entry(mon->db, entry);
+            g_hash_table_insert(mon->path_to_entry, g_strdup(child_path), entry);
+
+            g_debug("[monitor] scan_new_dir: found file %s", child_path);
+        }
+
+        g_free(child_path);
+    }
+
+    g_dir_close(dir);
 }
 
 static void
@@ -246,8 +313,10 @@ apply_batch_idle(gpointer user_data) {
                 db_insert_folder_entry(mon->db, entry);
                 g_hash_table_insert(mon->path_to_entry, g_strdup(event->path), entry);
 
-                // Add inotify watch for new directory
+                // Add inotify watch for new directory, then scan its current
+                // contents to catch files created before the watch was established.
                 add_watch_for_dir(mon, event->path);
+                scan_new_dir(mon, event->path, entry);
 
                 g_debug("[monitor] created folder: %s", event->path);
             } else {
@@ -342,6 +411,54 @@ apply_batch_idle(gpointer user_data) {
 
                 g_free(new_name);
                 g_free(new_dir);
+            } else if (event->new_path) {
+                // Source not in DB — this happens when a sync client (e.g. Nextcloud)
+                // writes content to a temp file then renames it over the real file.
+                // Treat as MODIFY if the destination is already known, CREATE otherwise.
+                FsearchDatabaseEntry *dest_entry = g_hash_table_lookup(mon->path_to_entry, event->new_path);
+                struct stat st;
+                if (dest_entry && stat(event->new_path, &st) == 0) {
+                    if (db_entry_is_file(dest_entry)) {
+                        db_remove_file_entry(mon->db, dest_entry);
+                        db_entry_set_size(dest_entry, st.st_size);
+                        db_entry_set_mtime(dest_entry, st.st_mtime);
+                        db_insert_file_entry(mon->db, dest_entry);
+                    } else {
+                        db_remove_folder_entry(mon->db, dest_entry);
+                        db_entry_set_mtime(dest_entry, st.st_mtime);
+                        db_insert_folder_entry(mon->db, dest_entry);
+                    }
+                    g_debug("[monitor] rename-over (temp->real): updated %s", event->new_path);
+                } else if (!dest_entry && stat(event->new_path, &st) == 0) {
+                    // Destination didn't exist in DB either — treat as create
+                    char *name = g_path_get_basename(event->new_path);
+                    char *dir = g_path_get_dirname(event->new_path);
+                    FsearchDatabaseEntry *parent = g_hash_table_lookup(mon->path_to_entry, dir);
+                    if (S_ISDIR(st.st_mode)) {
+                        FsearchDatabaseEntry *new_entry = db_alloc_folder_entry(mon->db);
+                        db_entry_set_name(new_entry, name);
+                        db_entry_set_mtime(new_entry, st.st_mtime);
+                        if (parent && db_entry_is_folder(parent)) {
+                            db_entry_set_parent(new_entry, (FsearchDatabaseEntryFolder *)parent);
+                        }
+                        db_insert_folder_entry(mon->db, new_entry);
+                        g_hash_table_insert(mon->path_to_entry, g_strdup(event->new_path), new_entry);
+                        add_watch_for_dir(mon, event->new_path);
+                    } else {
+                        FsearchDatabaseEntry *new_entry = db_alloc_file_entry(mon->db);
+                        db_entry_set_name(new_entry, name);
+                        db_entry_set_size(new_entry, st.st_size);
+                        db_entry_set_mtime(new_entry, st.st_mtime);
+                        if (parent && db_entry_is_folder(parent)) {
+                            db_entry_set_parent(new_entry, (FsearchDatabaseEntryFolder *)parent);
+                        }
+                        db_insert_file_entry(mon->db, new_entry);
+                        g_hash_table_insert(mon->path_to_entry, g_strdup(event->new_path), new_entry);
+                    }
+                    g_debug("[monitor] rename-over (new file): created %s", event->new_path);
+                    g_free(name);
+                    g_free(dir);
+                }
             }
             break;
         }
@@ -365,8 +482,21 @@ schedule_batch_apply(FsearchMonitor *mon) {
     }
 }
 
+static gboolean
+trigger_rescan_idle(gpointer user_data) {
+    g_action_group_activate_action(G_ACTION_GROUP(g_application_get_default()), "update_database", NULL);
+    return G_SOURCE_REMOVE;
+}
+
 static void
 process_inotify_event(FsearchMonitor *mon, const struct inotify_event *event) {
+    // IN_Q_OVERFLOW has wd == -1 and len == 0 — check it before the len guard
+    if (event->mask & IN_Q_OVERFLOW) {
+        g_warning("[monitor] inotify queue overflow, triggering full rescan");
+        g_atomic_int_set(&mon->needs_rescan, TRUE);
+        return;
+    }
+
     if (!event->len) {
         // Events without a name (e.g. IN_DELETE_SELF on the watched dir itself)
         if (event->mask & (IN_DELETE_SELF | IN_MOVE_SELF)) {
@@ -391,14 +521,6 @@ process_inotify_event(FsearchMonitor *mon, const struct inotify_event *event) {
     gboolean is_dir = (event->mask & IN_ISDIR) != 0;
 
     g_mutex_lock(&mon->batch_mutex);
-
-    if (event->mask & IN_Q_OVERFLOW) {
-        g_warning("[monitor] inotify queue overflow, full rescan needed");
-        // TODO: trigger full rescan
-        g_mutex_unlock(&mon->batch_mutex);
-        g_free(full_path);
-        return;
-    }
 
     if (event->mask & IN_CREATE) {
         MonitorEvent *me = monitor_event_new(MONITOR_EVENT_CREATE, full_path, is_dir);
@@ -485,10 +607,46 @@ monitor_thread_func(gpointer data) {
             process_inotify_event(mon, event);
             ptr += sizeof(struct inotify_event) + event->len;
         }
+
+        // If an overflow was detected, discard all pending events and trigger
+        // a full database rescan instead of trying to apply partial updates.
+        if (g_atomic_int_compare_and_exchange(&mon->needs_rescan, TRUE, FALSE)) {
+            g_mutex_lock(&mon->batch_mutex);
+            MonitorEvent *ev;
+            while ((ev = g_queue_pop_head(mon->pending_events)) != NULL) {
+                monitor_event_free(ev);
+            }
+            if (mon->batch_timeout_id) {
+                g_source_remove(mon->batch_timeout_id);
+                mon->batch_timeout_id = 0;
+            }
+            g_mutex_unlock(&mon->batch_mutex);
+            g_idle_add(trigger_rescan_idle, NULL);
+            g_debug("[monitor] overflow detected, full rescan scheduled");
+        }
     }
 
     g_debug("[monitor] watcher thread stopped");
     return NULL;
+}
+
+static void
+on_prepare_for_sleep(GDBusConnection *connection,
+                     const gchar *sender_name,
+                     const gchar *object_path,
+                     const gchar *interface_name,
+                     const gchar *signal_name,
+                     GVariant *parameters,
+                     gpointer user_data) {
+    gboolean going_to_sleep = FALSE;
+    g_variant_get(parameters, "(b)", &going_to_sleep);
+
+    if (!going_to_sleep) {
+        // System just resumed — trigger a full rescan because inotify may have
+        // missed events while suspended.
+        g_debug("[monitor] system resumed from suspend, scheduling full rescan");
+        g_idle_add(trigger_rescan_idle, NULL);
+    }
 }
 
 FsearchMonitor *
@@ -571,6 +729,24 @@ fsearch_monitor_start(FsearchMonitor *mon) {
     g_atomic_int_set(&mon->running, TRUE);
     mon->thread = g_thread_new("fsearch-monitor", monitor_thread_func, mon);
 
+    // Subscribe to systemd's PrepareForSleep signal so we can trigger a
+    // full rescan when the system wakes from suspend.
+    GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, NULL);
+    if (bus) {
+        mon->sleep_subscription_id = g_dbus_connection_signal_subscribe(
+            bus,
+            "org.freedesktop.login1",
+            "org.freedesktop.login1.Manager",
+            "PrepareForSleep",
+            "/org/freedesktop/login1",
+            NULL,
+            G_DBUS_SIGNAL_FLAGS_NONE,
+            on_prepare_for_sleep,
+            mon,
+            NULL);
+        g_object_unref(bus);
+    }
+
     g_debug("[monitor] started");
 }
 
@@ -593,6 +769,16 @@ fsearch_monitor_stop(FsearchMonitor *mon) {
     if (mon->batch_timeout_id) {
         g_source_remove(mon->batch_timeout_id);
         mon->batch_timeout_id = 0;
+    }
+
+    // Unsubscribe from sleep signal
+    if (mon->sleep_subscription_id) {
+        GDBusConnection *bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, NULL);
+        if (bus) {
+            g_dbus_connection_signal_unsubscribe(bus, mon->sleep_subscription_id);
+            g_object_unref(bus);
+        }
+        mon->sleep_subscription_id = 0;
     }
 
     g_debug("[monitor] stopped");

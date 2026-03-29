@@ -1121,8 +1121,15 @@ on_fsearch_list_view_header_drag_gesture_end(GtkGestureDrag *gesture,
                                              FsearchListView *view) {
     // GdkEventSequence *sequence = gtk_gesture_single_get_current_sequence(GTK_GESTURE_SINGLE(gesture));
     if (view->col_resize_mode) {
+        // Release the pointer grab
+        GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(view));
+        GdkSeat *seat = gdk_display_get_default_seat(display);
+        gdk_seat_ungrab(seat);
+
         view->col_resize_mode = FALSE;
         view->drag_column_pos = -1;
+        // Final relayout to reposition all resize handles
+        gtk_widget_queue_resize(GTK_WIDGET(view));
     }
 }
 
@@ -1139,17 +1146,6 @@ on_fsearch_list_view_header_drag_gesture_update(GtkGestureDrag *gesture,
         return;
     }
 
-    gdouble start_x, start_y;
-    gtk_gesture_drag_get_start_point(gesture, &start_x, &start_y);
-
-    gdouble x = start_x;
-    if (fsearch_list_view_is_text_dir_rtl(view)) {
-        x -= offset_x;
-    }
-    else {
-        x += offset_x;
-    }
-
     GList *columns = fsearch_list_view_get_columns_for_text_direction(view);
     if (view->col_resize_mode) {
         GList *c = g_list_nth(columns, view->drag_column_pos);
@@ -1157,9 +1153,15 @@ on_fsearch_list_view_header_drag_gesture_update(GtkGestureDrag *gesture,
             return;
         }
 
+        gdouble delta = offset_x;
+        if (fsearch_list_view_is_text_dir_rtl(view)) {
+            delta = -offset_x;
+        }
+
         FsearchListViewColumn *col = c->data;
-        col->width = x - view->x_drag_started;
-        col->width = MAX(30, col->width);
+        gint new_width = (gint)(view->x_drag_started + delta);
+        new_width = MAX(30, new_width);
+        col->width = new_width;
         gtk_widget_queue_resize(GTK_WIDGET(view));
     }
 }
@@ -1188,7 +1190,14 @@ on_fsearch_list_view_header_drag_gesture_begin(GtkGestureDrag *gesture,
         view->col_resize_mode = TRUE;
 
         view->drag_column_pos = col_pos;
-        view->x_drag_started = start_x - column->effective_width;
+        // Store the initial column width so we can apply the drag offset to it
+        view->x_drag_started = column->width;
+
+        // Grab the pointer so events keep coming to this window even when
+        // the resize handle GdkWindow moves during the drag.
+        GdkSeat *seat = gdk_display_get_default_seat(gdk_window_get_display(column->window));
+        gdk_seat_grab(seat, column->window, GDK_SEAT_CAPABILITY_ALL_POINTING,
+                      TRUE, NULL, event, NULL, NULL);
 
         if (!gtk_widget_has_focus(GTK_WIDGET(view))) {
             gtk_widget_grab_focus(GTK_WIDGET(view));
@@ -1584,15 +1593,20 @@ fsearch_list_view_size_allocate(GtkWidget *widget, GtkAllocation *allocation) {
 
         gtk_widget_size_allocate(column->button, &header_button_rect);
         if (gtk_widget_get_realized(column->button)) {
-            int x_win = x - COLUMN_RESIZE_AREA_WIDTH / 2;
-            if (fsearch_list_view_is_text_dir_rtl(view)) {
-                x_win -= header_button_rect.width;
+            // Don't move the resize handle during an active column resize drag,
+            // otherwise the 6px GdkWindow slides out from under the cursor and
+            // the gesture loses tracking.
+            if (!view->col_resize_mode) {
+                int x_win = x - COLUMN_RESIZE_AREA_WIDTH / 2;
+                if (fsearch_list_view_is_text_dir_rtl(view)) {
+                    x_win -= header_button_rect.width;
+                }
+                gdk_window_move_resize(column->window,
+                                       x_win,
+                                       header_button_rect.y,
+                                       COLUMN_RESIZE_AREA_WIDTH,
+                                       header_button_rect.height);
             }
-            gdk_window_move_resize(column->window,
-                                   x_win,
-                                   header_button_rect.y,
-                                   COLUMN_RESIZE_AREA_WIDTH,
-                                   header_button_rect.height);
         }
     }
 

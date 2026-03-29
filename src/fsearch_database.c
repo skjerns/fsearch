@@ -76,6 +76,7 @@ struct FsearchDatabase {
     time_t timestamp;
 
     volatile int ref_count;
+    volatile gint view_refresh_pending;
 
     GRWLock rw_lock;
 };
@@ -1475,6 +1476,8 @@ db_alloc_folder_entry(FsearchDatabase *db) {
 static gboolean
 db_notify_views_content_changed_idle(gpointer user_data) {
     FsearchDatabase *db = user_data;
+    // Clear the pending flag so new notifications can be scheduled
+    g_atomic_int_set(&db->view_refresh_pending, 0);
     for (GList *l = db->db_views; l; l = l->next) {
         db_view_refresh(l->data);
     }
@@ -1485,7 +1488,12 @@ db_notify_views_content_changed_idle(gpointer user_data) {
 void
 db_notify_views_content_changed(FsearchDatabase *db) {
     g_assert(db);
-    g_debug("[db] notifying %d views of content change", g_list_length(db->db_views));
+    // Only schedule one refresh at a time — if one is already pending on the
+    // main loop, skip this call.  The pending refresh will pick up all changes
+    // made so far because it reads the database under lock.
+    if (!g_atomic_int_compare_and_exchange(&db->view_refresh_pending, 0, 1)) {
+        return;
+    }
     g_idle_add(db_notify_views_content_changed_idle, db_ref(db));
 }
 

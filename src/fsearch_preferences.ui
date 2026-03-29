@@ -214,6 +214,21 @@
                               </packing>
                             </child>
                             <child>
+                              <object class="GtkCheckButton" id="load_on_startup_button">
+                                <property name="label" translatable="yes">Load on startup</property>
+                                <property name="visible">True</property>
+                                <property name="can-focus">True</property>
+                                <property name="receives-default">False</property>
+                                <property name="has-tooltip">True</property>
+                                <property name="draw-indicator">True</property>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                                <property name="position">5</property>
+                              </packing>
+                            </child>
+                            <child>
                               <object class="GtkFrame" id="action_after_file_open_frame">
                                 <property name="visible">True</property>
                                 <property name="can-focus">False</property>
@@ -2057,6 +2072,23 @@ If enabled, FSearch exits when the Escape key is pressed instead of the window b
                     <property name="name">page35</property>
                     <property name="title">page35</property>
                     <property name="position">35</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="help_load_on_startup">
+                    <property name="visible">True</property>
+                    <property name="can-focus">False</property>
+                    <property name="label" translatable="yes">&lt;b&gt;Load on startup:&lt;/b&gt;
+
+If enabled, FSearch starts automatically when you log in, running hidden in the system tray with the database pre-loaded for instant search.</property>
+                    <property name="use-markup">True</property>
+                    <property name="wrap">True</property>
+                    <property name="selectable">True</property>
+                  </object>
+                  <packing>
+                    <property name="name">page36</property>
+                    <property name="title">page36</property>
+                    <property name="position">36</property>
                   </packing>
                 </child>
               </object>

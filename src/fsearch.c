@@ -38,6 +38,7 @@
 #include "fsearch_monitor.h"
 #include <glib.h>
 #include <glib/gi18n.h>
+#include <glib/gstdio.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -504,6 +505,28 @@ on_preferences_ui_finished(FsearchConfig *new_config) {
     app->config = new_config;
     config_save(app->config);
 
+    // Manage autostart desktop file
+    {
+        g_autofree char *autostart_dir = g_build_filename(g_get_user_config_dir(), "autostart", NULL);
+        g_autofree char *autostart_path = g_build_filename(autostart_dir, "fsearch.desktop", NULL);
+        if (new_config->load_on_startup) {
+            g_mkdir_with_parents(autostart_dir, 0755);
+            const char *desktop_content =
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                "Name=FSearch\n"
+                "Comment=Fast file search utility\n"
+                "Exec=fsearch --hidden\n"
+                "Icon=io.github.cboxdoerfer.FSearch\n"
+                "Terminal=false\n"
+                "X-GNOME-Autostart-enabled=true\n";
+            g_file_set_contents(autostart_path, desktop_content, -1, NULL);
+        }
+        else {
+            g_remove(autostart_path);
+        }
+    }
+
     g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", new_config->enable_dark_theme, NULL);
     database_auto_update_init(app);
 
@@ -657,16 +680,8 @@ set_accels_for_action(GApplication *app, const char *action, const gchar *const 
 
 static void
 set_accels_for_escape(GApplication *app) {
-    FsearchApplication *fsearch = FSEARCH_APPLICATION(app);
-
-    if (fsearch->config->exit_on_escape) {
-        set_accels_for_action(app, "win.hide_window", (const gchar *const[]){NULL});
-        set_accels_for_action(app, "app.quit", (const gchar *const[]){"<control>q", "Escape", NULL});
-    }
-    else {
-        set_accel_for_action(app, "win.hide_window", "Escape");
-        set_accel_for_action(app, "app.quit", "<control>q");
-    }
+    // Escape and Ctrl+Q both hide the window to tray (quit only via tray menu)
+    set_accels_for_action(app, "win.hide_window", (const gchar *const[]){"Escape", "<control>q", NULL});
 }
 
 static void
