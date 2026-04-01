@@ -2213,13 +2213,34 @@ fsearch_list_view_set_config(FsearchListView *view, uint32_t num_rows, int sort_
     if (!view) {
         return;
     }
-    view->cursor_idx = UNSET_ROW;
-    view->highlight_cursor_idx = FALSE;
 
-    view->extend_started_idx = UNSET_ROW;
+    // If only the row count changed slightly (e.g. inotify added/removed a few files)
+    // and the sort config is the same, preserve the cursor position and scroll offset
+    // so that keyboard navigation isn't disrupted.
+    gboolean sort_changed = (view->sort_order != sort_order || view->sort_type != sort_type);
+    gboolean row_count_changed_significantly = (view->num_rows == 0 && num_rows > 0)
+                                             || (num_rows == 0 && view->num_rows > 0);
+
+    if (sort_changed || row_count_changed_significantly) {
+        view->cursor_idx = UNSET_ROW;
+        view->highlight_cursor_idx = FALSE;
+        view->extend_started_idx = UNSET_ROW;
+        gtk_adjustment_set_value(view->vadjustment, 0);
+    } else {
+        // Clamp cursor to new row count
+        if (view->cursor_idx != UNSET_ROW && num_rows > 0) {
+            gint last_row = (gint)num_rows - 1;
+            if (view->cursor_idx > last_row) {
+                view->cursor_idx = last_row;
+            }
+            if (view->extend_started_idx != UNSET_ROW && view->extend_started_idx > last_row) {
+                view->extend_started_idx = last_row;
+            }
+        }
+    }
+
     view->num_rows = num_rows;
     view->list_height = num_rows * view->row_height;
-    gtk_adjustment_set_value(view->vadjustment, 0);
 
     view->sort_order = sort_order;
     view->sort_type = sort_type;
