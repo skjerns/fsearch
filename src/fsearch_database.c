@@ -208,12 +208,6 @@ db_sort(FsearchDatabase *db, GCancellable *cancellable) {
 }
 
 static void
-db_update_timestamp(FsearchDatabase *db) {
-    g_assert(db);
-    db->timestamp = time(NULL);
-}
-
-static void
 db_entry_update_folder_indices(FsearchDatabase *db) {
     if (!db || !db->sorted_folders[DATABASE_INDEX_TYPE_NAME]) {
         return;
@@ -315,50 +309,6 @@ read_element_from_file(void *restrict ptr, size_t size, FILE *restrict stream) {
 }
 
 static bool
-db_load_entry_super_elements(FILE *fp, FsearchDatabaseEntry *entry, GString *previous_entry_name) {
-    // name_offset: character position after which previous_entry_name and entry_name differ
-    uint8_t name_offset = 0;
-    if (!read_element_from_file(&name_offset, 1, fp)) {
-        g_debug("[db_load] failed to load name offset");
-        return false;
-    }
-
-    // name_len: length of the new name characters
-    uint8_t name_len = 0;
-    if (!read_element_from_file(&name_len, 1, fp)) {
-        g_debug("[db_load] failed to load name length");
-        return false;
-    }
-
-    // erase previous name starting at name_offset
-    g_string_erase(previous_entry_name, name_offset, -1);
-
-    char name[256] = "";
-    // name: new characters to be appended to previous_entry_name
-    if (name_len > 0) {
-        if (!read_element_from_file(name, name_len, fp)) {
-            g_debug("[db_load] failed to load name");
-            return false;
-        }
-        name[name_len] = '\0';
-    }
-
-    // now we can build the new full file name
-    g_string_append(previous_entry_name, name);
-    db_entry_set_name(entry, previous_entry_name->str);
-
-    // size: size of file/folder
-    uint64_t size = 0;
-    if (!read_element_from_file(&size, 8, fp)) {
-        g_debug("[db_load] failed to load size");
-        return false;
-    }
-    db_entry_set_size(entry, (off_t)size);
-
-    return true;
-}
-
-static bool
 db_load_header(FILE *fp) {
     char magic[5] = "";
     if (!read_element_from_file(magic, strlen(DATABASE_MAGIC_NUMBER), fp)) {
@@ -393,14 +343,6 @@ db_load_header(FILE *fp) {
     return true;
 }
 
-static bool
-db_load_parent_idx(FILE *fp, uint32_t *parent_idx) {
-    if (!read_element_from_file(parent_idx, 4, fp)) {
-        g_debug("[db_load] failed to load parent_idx");
-        return false;
-    }
-    return true;
-}
 
 static bool
 db_load_folders(FILE *fp,
@@ -1066,7 +1008,6 @@ db_save(FsearchDatabase *db, const char *path) {
     }
 
     uint64_t file_block_size = 0;
-    const uint64_t file_block_size_offset = bytes_written;
     g_debug("[db_save] saving file block size...");
     bytes_written += write_data_to_file(fp, &file_block_size, 8, 1, &write_failed);
     if (write_failed == true) {

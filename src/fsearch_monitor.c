@@ -307,6 +307,14 @@ apply_batch_idle(gpointer user_data) {
     while ((event = g_queue_pop_head(coalesced)) != NULL) {
         switch (event->type) {
         case MONITOR_EVENT_CREATE: {
+            // Skip if we already track this path (avoids duplicates from
+            // race between scan_new_dir and inotify events across batches)
+            if (g_hash_table_contains(mon->path_to_entry, event->path)) {
+                g_debug("[monitor] create skipped (already tracked): %s", event->path);
+                monitor_event_free(event);
+                continue;
+            }
+
             struct stat st;
             if (stat(event->path, &st) != 0) {
                 g_debug("[monitor] stat failed for %s: %s", event->path, g_strerror(errno));

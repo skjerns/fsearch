@@ -205,19 +205,6 @@ fsearch_list_view_get_columns_effective_width(FsearchListView *view) {
     return width;
 }
 
-static int
-fsearch_list_view_get_columns_width(FsearchListView *view) {
-    int width = 0;
-    for (GList *col = view->columns; col != NULL; col = col->next) {
-        FsearchListViewColumn *column = col->data;
-        if (!column->visible) {
-            continue;
-        }
-        width += column->width;
-    }
-    return width;
-}
-
 static gboolean
 is_row_idx_fully_in_view(FsearchListView *view, int row_idx) {
     const int y_view_start = floor(get_vscroll_pos(view));
@@ -1081,12 +1068,6 @@ on_fsearch_list_view_bin_drag_gesture_update(GtkGestureDrag *gesture,
                                              gdouble offset_x,
                                              gdouble offset_y,
                                              FsearchListView *view) {
-    GdkEventSequence *sequence = gtk_gesture_single_get_current_sequence(GTK_GESTURE_SINGLE(gesture));
-
-    // if (gtk_gesture_get_sequence_state(GTK_GESTURE(gesture), sequence) != GTK_EVENT_SEQUENCE_CLAIMED) {
-    //     return;
-    // }
-
     if (view->bin_drag_mode == FALSE) {
         return;
     }
@@ -1703,8 +1684,6 @@ fsearch_list_view_map(GtkWidget *widget) {
 
 static void
 fsearch_list_view_grab_focus(GtkWidget *widget) {
-    FsearchListView *view = FSEARCH_LIST_VIEW(widget);
-
     GTK_WIDGET_CLASS(fsearch_list_view_parent_class)->grab_focus(widget);
 }
 

@@ -57,12 +57,6 @@ on_column_index_one_fs_toggled(GtkCellRendererToggle *cell, gchar *path_str, gpo
 }
 
 static void
-on_column_index_toggled(GtkCellRendererToggle *cell, gchar *path_str, gpointer data) {
-    GtkTreeModel *index_model = data;
-    on_column_toggled(path_str, index_model, COL_INDEX_UPDATE);
-}
-
-static void
 column_toggle_append(GtkTreeView *view,
                      GtkTreeModel *model,
                      const char *name,
@@ -232,12 +226,6 @@ pref_index_treeview_init(GtkTreeView *view, GList *indexes) {
                          COL_INDEX_ONE_FS,
                          G_CALLBACK(on_column_index_one_fs_toggled),
                          store);
-    // column_toggle_append(view,
-    //                      GTK_TREE_MODEL(store),
-    //                      _("Update"),
-    //                      COL_INDEX_UPDATE,
-    //                      G_CALLBACK(on_column_index_toggled),
-    //                      store);
 
     for (GList *l = indexes; l != NULL; l = l->next) {
         GtkTreeIter iter = {};
