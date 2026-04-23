@@ -132,9 +132,8 @@ fsearch_query_lexer_get_next_token(FsearchQueryLexer *lexer, GString **result) {
             parse_quoted_string(lexer, token_value);
         }
         else if (c == '\\') {
-            // escape: get next char
-            c = get_next_char(lexer);
-            g_string_append_c(token_value, c);
+            // treat backslash as equivalent to forward slash (folder search prefix)
+            g_string_append_c(token_value, '/');
             only_quoted_content = false;
         }
         else if (strchr(reserved_chars, c)) {

@@ -427,3 +427,28 @@ fsearch_query_node_new(const char *search_term, FsearchQueryFlags flags) {
     }
     return res;
 }
+
+FsearchQueryNode *
+fsearch_query_node_new_folder_search(const char *search_term, FsearchQueryFlags flags) {
+    // Create a regular search node (handles wildcards, regex, case, etc.)
+    FsearchQueryNode *res = fsearch_query_node_new(search_term, flags);
+    if (!res) {
+        return res;
+    }
+
+    // Override haystack to search in parent path instead of name/full-path
+    if (res->haystack_func == (FsearchQueryNodeHaystackFunc *)fsearch_query_match_data_get_name_str
+        || res->haystack_func == (FsearchQueryNodeHaystackFunc *)fsearch_query_match_data_get_path_str) {
+        res->haystack_func = (FsearchQueryNodeHaystackFunc *)fsearch_query_match_data_get_parent_path_str;
+    }
+    else if (res->haystack_func == (FsearchQueryNodeHaystackFunc *)fsearch_query_match_data_get_utf_name_builder
+             || res->haystack_func == (FsearchQueryNodeHaystackFunc *)fsearch_query_match_data_get_utf_path_builder) {
+        res->haystack_func = (FsearchQueryNodeHaystackFunc *)fsearch_query_match_data_get_utf_parent_path_builder;
+    }
+
+    if (res->description) {
+        g_string_prepend(res->description, "folder_");
+    }
+
+    return res;
+}

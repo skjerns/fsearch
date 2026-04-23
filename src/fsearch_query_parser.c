@@ -473,6 +473,12 @@ parse_word(GString *field_name, FsearchQueryFlags flags) {
     if (!field_name) {
         return NULL;
     }
+    // Check for folder search prefix: /term or \term (\ converted to / by lexer)
+    // Skip if SEARCH_IN_PATH is already set (e.g. from path: modifier) since / is literal there
+    if (field_name->len > 1 && field_name->str[0] == '/' && !(flags & QUERY_FLAG_SEARCH_IN_PATH)) {
+        const char *search_term = field_name->str + 1;
+        return new_list(fsearch_query_node_new_folder_search(search_term, flags));
+    }
     return new_list(fsearch_query_node_new(field_name->str, flags));
 }
 

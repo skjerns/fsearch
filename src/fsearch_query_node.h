@@ -143,3 +143,6 @@ fsearch_query_node_new_contenttype(const char *search_term, FsearchQueryFlags fl
 
 FsearchQueryNode *
 fsearch_query_node_new(const char *search_term, FsearchQueryFlags flags);
+
+FsearchQueryNode *
+fsearch_query_node_new_folder_search(const char *search_term, FsearchQueryFlags flags);
