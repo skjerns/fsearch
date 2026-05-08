@@ -67,6 +67,8 @@ struct FsearchMonitor {
 
     // Resume detection
     guint sleep_subscription_id;
+
+    gboolean watch_limit_reached; // ENOSPC hit — suppress further add_watch attempts
 };
 
 static void
@@ -197,6 +199,9 @@ scan_new_dir(FsearchMonitor *mon, const char *dir_path, FsearchDatabaseEntry *pa
 
 static void
 add_watch_for_dir(FsearchMonitor *mon, const char *dir_path) {
+    if (mon->watch_limit_reached) {
+        return;
+    }
     if (g_hash_table_contains(mon->path_to_wd, dir_path)) {
         return;
     }
@@ -204,7 +209,15 @@ add_watch_for_dir(FsearchMonitor *mon, const char *dir_path) {
     int wd = inotify_add_watch(mon->inotify_fd, dir_path, INOTIFY_WATCH_MASK);
     if (wd < 0) {
         if (errno == ENOSPC) {
-            g_warning("[monitor] inotify watch limit reached, cannot watch: %s", dir_path);
+            mon->watch_limit_reached = TRUE;
+            g_warning("[monitor] inotify_add_watch(%s) failed: (No space left on device)\n"
+                      "[monitor] The inotify watch limit has been reached (%d watches).\n"
+                      "[monitor] Real-time updates will be incomplete for unwatched directories.\n"
+                      "[monitor] To fix, run: sudo sysctl fs.inotify.max_user_watches=524288\n"
+                      "[monitor] To make permanent: echo 'fs.inotify.max_user_watches=524288'"
+                      " | sudo tee /etc/sysctl.d/99-fsearch.conf",
+                      dir_path,
+                      g_hash_table_size(mon->wd_to_path));
         } else {
             g_debug("[monitor] failed to add watch for %s: %s", dir_path, g_strerror(errno));
         }
