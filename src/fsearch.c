@@ -48,6 +48,23 @@
 #include <gdk/gdkx.h>
 #endif
 
+// Present a window, using a valid timestamp on X11 for proper focus stealing.
+// gdk_x11_get_server_time() must only be called on an actual X11 display: GTK is
+// usually built with both X11 and Wayland backends, so the GDK_WINDOWING_X11
+// compile-time macro is defined even when running under Wayland, where calling
+// the X11-only function crashes.
+static void
+fsearch_present_window(GtkWindow *window) {
+#ifdef GDK_WINDOWING_X11
+    GdkWindow *gdk_window = gtk_widget_get_window(GTK_WIDGET(window));
+    if (gdk_window && GDK_IS_X11_DISPLAY(gdk_window_get_display(gdk_window))) {
+        gtk_window_present_with_time(window, gdk_x11_get_server_time(gdk_window));
+        return;
+    }
+#endif
+    gtk_window_present(window);
+}
+
 struct _FsearchApplication {
     GtkApplication parent;
     FsearchDatabase *db;
@@ -385,11 +402,7 @@ fsearch_application_toggle_window(FsearchApplication *self) {
         gtk_widget_hide(GTK_WIDGET(window));
     } else {
         gtk_widget_show(GTK_WIDGET(window));
-#ifdef GDK_WINDOWING_X11
-        gtk_window_present_with_time(GTK_WINDOW(window), gdk_x11_get_server_time(gtk_widget_get_window(GTK_WIDGET(window))));
-#else
-        gtk_window_present(GTK_WINDOW(window));
-#endif
+        fsearch_present_window(GTK_WINDOW(window));
         fsearch_application_window_focus_search_entry(window);
     }
 }
@@ -582,11 +595,7 @@ action_new_window_activated(GSimpleAction *action, GVariant *parameter, gpointer
     move_search_term_to_window(self, FSEARCH_APPLICATION_WINDOW(window));
     fsearch_application_window_focus_search_entry(FSEARCH_APPLICATION_WINDOW(window));
 
-#ifdef GDK_WINDOWING_X11
-    gtk_window_present_with_time(GTK_WINDOW(window), gdk_x11_get_server_time(gtk_widget_get_window(GTK_WIDGET(window))));
-#else
-    gtk_window_present(window);
-#endif
+    fsearch_present_window(window);
 }
 
 static void
@@ -788,11 +797,7 @@ fsearch_application_activate(GApplication *app) {
             gtk_widget_show(GTK_WIDGET(window));
             move_search_term_to_window(self, window);
             fsearch_application_window_focus_search_entry(FSEARCH_APPLICATION_WINDOW(window));
-#ifdef GDK_WINDOWING_X11
-            gtk_window_present_with_time(GTK_WINDOW(window), gdk_x11_get_server_time(gtk_widget_get_window(GTK_WIDGET(window))));
-#else
-            gtk_window_present(GTK_WINDOW(window));
-#endif
+            fsearch_present_window(GTK_WINDOW(window));
             return;
         }
     }
