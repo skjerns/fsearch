@@ -1,4 +1,19 @@
-vibe-coded fork that implements drag&drop functionality
+# About this fork
+
+This is a personal fork of [cboxdoerfer/fsearch](https://github.com/cboxdoerfer/fsearch) with customized behaviour personalized for my own use. It tracks upstream FSearch but adds a number of quality-of-life features and fixes that turn it into a persistent, "Everything"-style search tool.
+
+### What's different from the upstream repo
+
+- **Real-time index via inotify** — instead of only scanning on demand, the database is kept live as files are created, deleted, moved and modified. No manual rescans needed.
+- **Tray-resident background process** — FSearch can stay running in the system tray (AppIndicator). The search window is shown/hidden on demand rather than created and destroyed each time, so it opens instantly.
+- **`--toggle` command** — running `fsearch --toggle` (e.g. from a global hotkey) shows the window if hidden and hides it if visible, talking to the already-running instance. The search field text is fully selected on every toggle so typing replaces the previous query.
+- **Drag & drop** — drag files directly out of the results list into other applications.
+- **Double-click on the Location column** opens the containing folder.
+- **`/term` and `\term` folder-search prefix syntax** and exact-match quoted search for more precise queries.
+- **Wayland fixes** — runtime X11 detection avoids a crash on window present under Plasma 6 / Wayland; focus handling when restoring from the background was fixed.
+- **Stability/performance fixes** — lower CPU after suspend/resume, no duplicate entries on inotify CREATE, graceful handling of the inotify watch limit (`ENOSPC`) with an actionable hint, and all compiler warnings removed.
+
+Everything below this section is the original upstream README.
 
 ---
 
