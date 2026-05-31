@@ -1399,8 +1399,12 @@ fsearch_application_window_selection_for_each(FsearchApplicationWindow *self, GH
 void
 fsearch_application_window_focus_search_entry(FsearchApplicationWindow *win) {
     g_assert(FSEARCH_IS_APPLICATION_WINDOW(win));
-    // Make sure the entry also has focus and the text is selected
+    // Make sure the entry also has focus and the text is selected.
+    // grab_focus only selects-all when the entry didn't already hold focus, so
+    // on toggle/restore select the whole text explicitly. Otherwise the previous
+    // query stays put with the cursor at the end and new typing gets appended.
     gtk_widget_grab_focus(win->search_entry);
+    gtk_editable_select_region(GTK_EDITABLE(win->search_entry), 0, -1);
 }
 
 GtkEntry *
