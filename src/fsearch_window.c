@@ -1396,15 +1396,30 @@ fsearch_application_window_selection_for_each(FsearchApplicationWindow *self, GH
     }
 }
 
+static gboolean
+focus_and_select_search_entry_idle(gpointer user_data) {
+    FsearchApplicationWindow *win = FSEARCH_APPLICATION_WINDOW(user_data);
+    gtk_widget_grab_focus(win->search_entry);
+    gtk_editable_select_region(GTK_EDITABLE(win->search_entry), 0, -1);
+    g_object_unref(win);
+    return G_SOURCE_REMOVE;
+}
+
 void
 fsearch_application_window_focus_search_entry(FsearchApplicationWindow *win) {
     g_assert(FSEARCH_IS_APPLICATION_WINDOW(win));
-    // Make sure the entry also has focus and the text is selected.
+    // Make sure the entry has focus and the whole text is selected, so that
+    // typing replaces the previous query instead of appending to it.
+    //
     // grab_focus only selects-all when the entry didn't already hold focus, so
-    // on toggle/restore select the whole text explicitly. Otherwise the previous
-    // query stays put with the cursor at the end and new typing gets appended.
+    // we select the region explicitly. We do it twice: once synchronously, and
+    // again on idle. Under Wayland the compositor delivers keyboard focus
+    // asynchronously after the window is mapped, which can clobber a selection
+    // set synchronously on toggle/restore; re-applying it once focus has settled
+    // makes the selection reliable.
     gtk_widget_grab_focus(win->search_entry);
     gtk_editable_select_region(GTK_EDITABLE(win->search_entry), 0, -1);
+    g_idle_add(focus_and_select_search_entry_idle, g_object_ref(win));
 }
 
 GtkEntry *
