@@ -472,6 +472,8 @@ action_about_activated(GSimpleAction *action, GVariant *parameter, gpointer app)
     }
 
     g_autoptr(GString) version = get_application_version();
+    // Append the build timestamp so it's easy to confirm which binary is running.
+    g_string_append_printf(version, "\nBuilt: %s %s", __DATE__, __TIME__);
 
     gtk_show_about_dialog(GTK_WINDOW(window),
                           "program-name",

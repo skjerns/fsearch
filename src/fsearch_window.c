@@ -68,6 +68,13 @@ struct _FsearchApplicationWindow {
 
     char *active_filter_name;
 
+    // When set, the search entry's text is selected the next time the entry
+    // receives focus. Used so that toggling/restoring the window selects the
+    // previous query (so typing replaces it), reliably even when the compositor
+    // delivers keyboard focus asynchronously (Wayland) or the desktop disables
+    // the gtk-entry-select-on-focus behaviour (e.g. KDE/Plasma).
+    gboolean select_search_entry_on_focus;
+
     FsearchResultView *result_view;
 };
 
@@ -921,6 +928,9 @@ on_database_scan_started(gpointer data, gpointer user_data) {
     database_scan_started(win);
 }
 
+static gboolean
+on_search_entry_focus_in_event(GtkWidget *widget, GdkEvent *event, gpointer user_data);
+
 static void
 fsearch_application_window_init(FsearchApplicationWindow *self) {
     g_assert(FSEARCH_IS_APPLICATION_WINDOW(self));
@@ -935,6 +945,13 @@ fsearch_application_window_init(FsearchApplicationWindow *self) {
     fsearch_window_actions_init(self);
     fsearch_application_window_init_listview(self);
     fsearch_application_window_init_overlays(self);
+
+    // Connect after GTK's default focus-in handler so our forced select-all (when
+    // armed) wins over the desktop's cursor placement. See focus_search_entry.
+    g_signal_connect_after(self->search_entry,
+                           "focus-in-event",
+                           G_CALLBACK(on_search_entry_focus_in_event),
+                           self);
 
     FsearchApplication *app = FSEARCH_APPLICATION_DEFAULT;
     g_signal_connect_object(app, "database-scan-started", G_CALLBACK(on_database_scan_started), self, G_CONNECT_AFTER);
@@ -1396,30 +1413,33 @@ fsearch_application_window_selection_for_each(FsearchApplicationWindow *self, GH
     }
 }
 
-static gboolean
-focus_and_select_search_entry_idle(gpointer user_data) {
-    FsearchApplicationWindow *win = FSEARCH_APPLICATION_WINDOW(user_data);
-    gtk_widget_grab_focus(win->search_entry);
-    gtk_editable_select_region(GTK_EDITABLE(win->search_entry), 0, -1);
-    g_object_unref(win);
-    return G_SOURCE_REMOVE;
-}
-
 void
 fsearch_application_window_focus_search_entry(FsearchApplicationWindow *win) {
     g_assert(FSEARCH_IS_APPLICATION_WINDOW(win));
     // Make sure the entry has focus and the whole text is selected, so that
     // typing replaces the previous query instead of appending to it.
     //
-    // grab_focus only selects-all when the entry didn't already hold focus, so
-    // we select the region explicitly. We do it twice: once synchronously, and
-    // again on idle. Under Wayland the compositor delivers keyboard focus
-    // asynchronously after the window is mapped, which can clobber a selection
-    // set synchronously on toggle/restore; re-applying it once focus has settled
-    // makes the selection reliable.
+    // Select synchronously for the case where focus is already on the entry (no
+    // focus-in event will fire), and also arm select_search_entry_on_focus so
+    // that select-all is re-applied when the entry actually receives focus. The
+    // latter is what makes it reliable: under Wayland the compositor delivers
+    // keyboard focus asynchronously after the window maps, and some desktops
+    // (KDE/Plasma) disable gtk-entry-select-on-focus, so a synchronous-only
+    // selection gets clobbered when focus finally lands and the cursor is placed.
+    win->select_search_entry_on_focus = TRUE;
     gtk_widget_grab_focus(win->search_entry);
     gtk_editable_select_region(GTK_EDITABLE(win->search_entry), 0, -1);
-    g_idle_add(focus_and_select_search_entry_idle, g_object_ref(win));
+}
+
+static gboolean
+on_search_entry_focus_in_event(GtkWidget *widget, GdkEvent *event, gpointer user_data) {
+    FsearchApplicationWindow *win = user_data;
+    g_assert(FSEARCH_IS_APPLICATION_WINDOW(win));
+    if (win->select_search_entry_on_focus) {
+        win->select_search_entry_on_focus = FALSE;
+        gtk_editable_select_region(GTK_EDITABLE(win->search_entry), 0, -1);
+    }
+    return GDK_EVENT_PROPAGATE;
 }
 
 GtkEntry *
