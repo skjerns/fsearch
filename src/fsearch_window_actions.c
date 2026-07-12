@@ -127,6 +127,19 @@ prepend_path_uri_to_array(FsearchDatabaseEntry *entry, gpointer user_data) {
     }
 }
 
+GStrv
+fsearch_window_actions_get_selected_file_uris(FsearchApplicationWindow *self) {
+    const guint num_selected_rows = fsearch_application_window_get_num_selected(self);
+    if (num_selected_rows == 0) {
+        return NULL;
+    }
+    g_autoptr(GPtrArray) file_array = g_ptr_array_new_full(num_selected_rows, g_free);
+    fsearch_application_window_selection_for_each(self, prepend_path_uri_to_array, &file_array);
+    // NULL-terminate so the array can be handed out as a GStrv.
+    g_ptr_array_add(file_array, NULL);
+    return (GStrv)g_ptr_array_free(g_steal_pointer(&file_array), FALSE);
+}
+
 static void
 prepend_string_to_list(GList **string_list,
                        FsearchDatabaseEntry *entry,

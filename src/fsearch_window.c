@@ -74,6 +74,13 @@ struct _FsearchApplicationWindow {
     uint32_t num_files_selected;
     uint32_t num_folders_selected;
 
+    // When set, the search entry's text is selected the next time it receives
+    // focus. Used so raising/focusing the window selects the previous query
+    // (so typing replaces it), reliably even when the compositor delivers focus
+    // asynchronously (Wayland) or the desktop disables gtk-entry-select-on-focus
+    // (e.g. KDE/Plasma).
+    bool select_search_entry_on_focus;
+
     FsearchResultView *result_view;
 };
 
@@ -102,6 +109,9 @@ fsearch_window_set_overlay_for_database_state(FsearchApplicationWindow *win, uin
 
 static void
 on_filter_combobox_changed(GtkComboBox *widget, gpointer user_data);
+
+static gboolean
+on_search_entry_focus_in_event(GtkWidget *widget, GdkEvent *event, gpointer user_data);
 
 static void
 modify_selection(FsearchApplicationWindow *self, FsearchSelectionType type, int32_t start_idx, int32_t end_idx) {
@@ -895,6 +905,21 @@ fsearch_application_window_init_overlays(FsearchApplicationWindow *win) {
 }
 
 static void
+on_listview_drag_data_get(GtkWidget *widget,
+                          GdkDragContext *context,
+                          GtkSelectionData *selection_data,
+                          guint info,
+                          guint time,
+                          gpointer user_data) {
+    FsearchApplicationWindow *win = user_data;
+    g_assert(FSEARCH_IS_APPLICATION_WINDOW(win));
+    g_auto(GStrv) uris = fsearch_window_actions_get_selected_file_uris(win);
+    if (uris) {
+        gtk_selection_data_set_uris(selection_data, uris);
+    }
+}
+
+static void
 fsearch_application_window_init_listview(FsearchApplicationWindow *win) {
     g_assert(FSEARCH_IS_APPLICATION_WINDOW(win));
 
@@ -926,6 +951,15 @@ fsearch_application_window_init_listview(FsearchApplicationWindow *win) {
     g_signal_connect_object(list_view, "row-popup", G_CALLBACK(on_fsearch_list_view_popup), win, G_CONNECT_AFTER);
     g_signal_connect_object(list_view, "row-activated", G_CALLBACK(on_fsearch_list_view_row_activated), win, G_CONNECT_AFTER);
     g_signal_connect(list_view, "key-press-event", G_CALLBACK(on_listview_key_press_event), win);
+
+    // Allow dragging the selected results into other applications as file URIs.
+    static const GtkTargetEntry drag_targets[] = {{(char *)"text/uri-list", 0, 0}};
+    gtk_drag_source_set(GTK_WIDGET(list_view),
+                        GDK_BUTTON1_MASK,
+                        drag_targets,
+                        G_N_ELEMENTS(drag_targets),
+                        GDK_ACTION_COPY);
+    g_signal_connect(list_view, "drag-data-get", G_CALLBACK(on_listview_drag_data_get), win);
 
     win->result_view->list_view = list_view;
 }
@@ -993,6 +1027,13 @@ fsearch_application_window_init(FsearchApplicationWindow *self) {
     fsearch_application_window_init_listview(self);
     fsearch_application_window_init_overlays(self);
 
+    // Connected after GTK's default focus-in handler so our select-all (when
+    // armed by focus_search_entry) wins over the desktop's cursor placement.
+    g_signal_connect_after(self->search_entry,
+                           "focus-in-event",
+                           G_CALLBACK(on_search_entry_focus_in_event),
+                           self);
+
     FsearchApplication *app = FSEARCH_APPLICATION_DEFAULT;
     self->db = fsearch_application_get_db(app);
     g_signal_connect_object(self->db, "search-started", G_CALLBACK(on_search_started), self, G_CONNECT_AFTER);
@@ -1023,6 +1064,20 @@ on_filter_combobox_changed(GtkComboBox *widget, gpointer user_data) {
     fsearch_statusbar_set_filter(FSEARCH_STATUSBAR(win->statusbar), active ? active_filter_name : NULL);
 
     perform_search(win);
+}
+
+static gboolean
+on_search_entry_focus_in_event(GtkWidget *widget, GdkEvent *event, gpointer user_data) {
+    FsearchApplicationWindow *win = user_data;
+    g_assert(FSEARCH_IS_APPLICATION_WINDOW(win));
+    // Re-apply the select-all requested by focus_search_entry once focus has
+    // actually landed. This wins over the desktop's cursor placement because it
+    // is connected after GTK's default focus-in handler.
+    if (win->select_search_entry_on_focus) {
+        win->select_search_entry_on_focus = false;
+        gtk_editable_select_region(GTK_EDITABLE(win->search_entry), 0, -1);
+    }
+    return GDK_EVENT_PROPAGATE;
 }
 
 static gboolean
@@ -1326,8 +1381,13 @@ fsearch_application_window_selection_for_each(FsearchApplicationWindow *self,
 void
 fsearch_application_window_focus_search_entry(FsearchApplicationWindow *win) {
     g_assert(FSEARCH_IS_APPLICATION_WINDOW(win));
-    // Make sure the entry also has focus and the text is selected
+    // Focus the entry and select all its text, so typing replaces the previous
+    // query instead of appending. Select synchronously for the already-focused
+    // case, and arm select_search_entry_on_focus so the selection is re-applied
+    // when focus actually lands (see on_search_entry_focus_in_event).
+    win->select_search_entry_on_focus = true;
     gtk_widget_grab_focus(win->search_entry);
+    gtk_editable_select_region(GTK_EDITABLE(win->search_entry), 0, -1);
 }
 
 GtkEntry *

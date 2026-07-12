@@ -28,3 +28,8 @@ fsearch_window_actions_update(FsearchApplicationWindow *self);
 
 void
 fsearch_window_action_open_generic(FsearchApplicationWindow *win, bool open_parent_folder, bool triggered_with_mouse);
+
+// Returns the currently selected entries as a NULL-terminated array of file://
+// URIs (caller frees with g_strfreev), or NULL if nothing is selected.
+GStrv
+fsearch_window_actions_get_selected_file_uris(FsearchApplicationWindow *win);
