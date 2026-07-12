@@ -304,7 +304,8 @@ include_append_row(GtkListStore *store,
 
 static gboolean
 on_include_append_new_row(GtkListStore *store, const char *path, GtkTreeIter *out_iter) {
-    return include_append_row(store, TRUE, path, FALSE, FALSE, FALSE, 0, out_iter);
+    // Default new folders to monitored (and, coupled with it, scan-after-launch).
+    return include_append_row(store, TRUE, path, FALSE, TRUE, TRUE, 0, out_iter);
 }
 
 static void

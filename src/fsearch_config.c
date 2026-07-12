@@ -178,7 +178,8 @@ static const FsearchKeyData INCLUDE_KEYS[] = {
     CONF_BOOL_OF(FsearchConfigIncludeKeys, active, false),
     CONF_STR_OF(FsearchConfigIncludeKeys, path, NULL),
     CONF_BOOL_OF(FsearchConfigIncludeKeys, one_file_system, false),
-    CONF_BOOL_OF(FsearchConfigIncludeKeys, monitor, false),
+    // Default folder monitoring ON so indexed folders are watched live.
+    CONF_BOOL_OF(FsearchConfigIncludeKeys, monitor, true),
     CONF_BOOL_OF(FsearchConfigIncludeKeys, scan_after_launch, false),
     CONF_INT64_OF(FsearchConfigIncludeKeys, rescan_after, 0),
 };
@@ -530,8 +531,9 @@ config_load_legacy_includes(GKeyFile *key_file) {
         g_string_printf(key, "%s_one_filesystem_%d", prefix, pos);
         const gboolean one_filesystem = g_key_file_get_boolean(key_file, group, key->str, NULL);
 
+        // Default monitoring ON for legacy includes too (4th arg = monitor).
         fsearch_database_include_manager_add(include_manager,
-                                             fsearch_database_include_new(path, enabled, one_filesystem, FALSE, FALSE, 0));
+                                             fsearch_database_include_new(path, enabled, one_filesystem, TRUE, FALSE, 0));
     }
 
     return include_manager;
