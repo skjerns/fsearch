@@ -489,7 +489,14 @@ parse_word(GString *field_name, FsearchQueryFlags flags) {
     if (!field_name) {
         return NULL;
     }
-    return new_list(fsearch_query_node_new(field_name->str, flags));
+    const char *word = field_name->str;
+    // A leading '/' (or '\', which the lexer normalizes to '/') is a shorthand for
+    // searching the term as a substring of the path instead of the file name.
+    if (word[0] == '/' && word[1] != '\0') {
+        flags |= QUERY_FLAG_SEARCH_IN_PATH;
+        word++;
+    }
+    return new_list(fsearch_query_node_new(word, flags));
 }
 
 static FsearchQueryToken

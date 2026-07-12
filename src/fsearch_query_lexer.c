@@ -125,9 +125,11 @@ fsearch_query_lexer_get_next_token(FsearchQueryLexer *lexer, GString **result) {
             parse_quoted_string(lexer, token_value);
         }
         else if (c == '\\') {
-            // escape: get next char
-            c = get_next_char(lexer);
-            g_string_append_c(token_value, c);
+            // Treat backslash as equivalent to forward slash so that "\term" works
+            // like "/term" (folder-search prefix, handled in the parser). Note this
+            // means unquoted backslash no longer escapes reserved chars; use quotes
+            // for that.
+            g_string_append_c(token_value, '/');
         }
         else if (strchr(reserved_chars, c)) {
             if (c == ':') {
