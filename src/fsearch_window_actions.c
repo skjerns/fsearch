@@ -732,7 +732,13 @@ fsearch_window_action_focus_search(GSimpleAction *action, GVariant *variant, gpo
 static void
 fsearch_window_action_hide_window(GSimpleAction *action, GVariant *variant, gpointer user_data) {
     FsearchApplicationWindow *self = user_data;
-    gtk_window_iconify(GTK_WINDOW(self));
+    if (fsearch_application_is_background_resident(FSEARCH_APPLICATION_DEFAULT)) {
+        // Hide to the tray so the app stays resident and the window leaves the taskbar.
+        gtk_widget_hide(GTK_WIDGET(self));
+    }
+    else {
+        gtk_window_iconify(GTK_WINDOW(self));
+    }
 }
 
 static void

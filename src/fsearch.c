@@ -29,6 +29,7 @@
 #include "fsearch_file_utils.h"
 #include "fsearch_preferences_dialog.h"
 #include "fsearch_preview.h"
+#include "fsearch_tray.h"
 #include "fsearch_window.h"
 
 #ifdef HAVE_CONFIG_H
@@ -56,6 +57,9 @@ struct _FsearchApplication {
     char *option_search_term;
     bool new_window;
     bool minimized;
+    bool hidden;
+
+    FsearchTray *tray;
 
     guint file_manager_watch_id;
     bool has_file_manager_on_bus;
@@ -279,6 +283,12 @@ show_app_window(FsearchApplication *self, FsearchApplicationWindow *app_window, 
     move_search_term_to_window(self, app_window);
     fsearch_application_window_focus_search_entry(app_window);
 
+    if (self->hidden) {
+        // Starting in the background (--hidden): keep the window hidden, it can
+        // be brought up later via --toggle or the tray.
+        return;
+    }
+
     if (minimized) {
         gtk_widget_show(GTK_WIDGET(app_window));
         gtk_window_iconify(GTK_WINDOW(app_window));
@@ -298,9 +308,39 @@ action_new_window_activated(GSimpleAction *action, GVariant *parameter, gpointer
 }
 
 static void
+fsearch_application_toggle_window(FsearchApplication *self) {
+    g_return_if_fail(FSEARCH_IS_APPLICATION(self));
+    FsearchApplicationWindow *window = get_first_application_window(self);
+    if (!window) {
+        // No window around (e.g. it was closed): create and show one.
+        g_action_group_activate_action(G_ACTION_GROUP(self), "new_window", g_variant_new_boolean(FALSE));
+        return;
+    }
+
+    GtkWidget *widget = GTK_WIDGET(window);
+    if (gtk_widget_get_visible(widget) && gtk_window_is_active(GTK_WINDOW(window))) {
+        // Visible and focused -> hide it away.
+        gtk_widget_hide(widget);
+    }
+    else {
+        // Hidden or not focused -> bring it to the front and focus the search.
+        gtk_widget_show(widget);
+        gtk_window_present_with_time(GTK_WINDOW(window), gtk_get_current_event_time());
+        fsearch_application_window_focus_search_entry(window);
+    }
+}
+
+static void
+action_toggle_window_activated(GSimpleAction *action, GVariant *parameter, gpointer app) {
+    fsearch_application_toggle_window(FSEARCH_APPLICATION(app));
+}
+
+static void
 fsearch_application_shutdown(GApplication *app) {
     g_assert(FSEARCH_IS_APPLICATION(app));
     FsearchApplication *self = FSEARCH_APPLICATION(app);
+
+    g_clear_pointer(&self->tray, fsearch_tray_free);
 
     for (GList *windows = gtk_application_get_windows(GTK_APPLICATION(app)); windows; windows = windows->next) {
         GtkWindow *window = windows->data;
@@ -508,10 +548,14 @@ fsearch_application_startup(GApplication *app) {
     set_accel_for_action(app, "win.close_window", "<control>w");
     set_accel_for_action(app, "app.help", "F1");
     set_accels_for_escape(app);
+
+    // Create the system-tray icon so the app can live in the background.
+    self->tray = fsearch_tray_new(self);
 }
 
 static GActionEntry fsearch_app_entries[] = {
     {"new_window", action_new_window_activated, "b", NULL, NULL},
+    {"toggle_window", action_toggle_window_activated, NULL, NULL, NULL},
     {"about", action_about_activated, NULL, NULL, NULL},
     {"online_help", action_online_help_activated, NULL, NULL, NULL},
     {"help", action_help_activated, NULL, NULL, NULL},
@@ -603,7 +647,7 @@ fsearch_application_activate(GApplication *app) {
     }
 
     g_action_group_activate_action(G_ACTION_GROUP(self), "new_window", g_variant_new_boolean(self->minimized));
-    if (should_show_welcome_dialog()) {
+    if (!self->hidden && should_show_welcome_dialog()) {
         FsearchApplicationWindow *window = get_first_application_window(self);
         if (window) {
             g_debug("[app] Triggering welcome dialog for version %s", PACKAGE_VERSION);
@@ -628,6 +672,15 @@ fsearch_application_command_line(GApplication *app, GApplicationCommandLine *cmd
         self->minimized = true;
     }
 
+    if (g_variant_dict_contains(dict, "hidden")) {
+        self->hidden = true;
+    }
+
+    if (g_variant_dict_contains(dict, "toggle")) {
+        g_action_group_activate_action(G_ACTION_GROUP(self), "toggle_window", NULL);
+        return 0;
+    }
+
     if (g_variant_dict_contains(dict, "preferences")) {
         g_action_group_activate_action(G_ACTION_GROUP(self), "preferences", g_variant_new_uint32(0));
         return 0;
@@ -647,6 +700,7 @@ fsearch_application_command_line(GApplication *app, GApplicationCommandLine *cmd
     g_application_activate(G_APPLICATION(self));
     self->new_window = false;
     self->minimized = false;
+    self->hidden = false;
 
     return G_APPLICATION_CLASS(fsearch_application_parent_class)->command_line(app, cmdline);
 }
@@ -787,6 +841,8 @@ fsearch_application_add_option_entries(FsearchApplication *self) {
     static const GOptionEntry main_entries[] = {
         {"new-window", 0, 0, G_OPTION_ARG_NONE, NULL, N_("Open a new application window")},
         {"minimized", 0, 0, G_OPTION_ARG_NONE, NULL, N_("Minimize the application window")},
+        {"toggle", 0, 0, G_OPTION_ARG_NONE, NULL, N_("Toggle the main window (show if hidden, hide if visible)")},
+        {"hidden", 0, 0, G_OPTION_ARG_NONE, NULL, N_("Start with the main window hidden (in the background)")},
         {"preferences", 0, 0, G_OPTION_ARG_NONE, NULL, N_("Show the application preferences")},
         {"search", 's', 0, G_OPTION_ARG_STRING, NULL, N_("Set the search pattern"), "PATTERN"},
         {"update-database", 'u', 0, G_OPTION_ARG_NONE, NULL, N_("Update the database and exit")},
@@ -827,6 +883,12 @@ FsearchDatabaseState
 fsearch_application_get_db_state(FsearchApplication *self) {
     g_assert(FSEARCH_IS_APPLICATION(self));
     return self->db_state;
+}
+
+bool
+fsearch_application_is_background_resident(FsearchApplication *self) {
+    g_assert(FSEARCH_IS_APPLICATION(self));
+    return fsearch_tray_is_available(self->tray);
 }
 
 uint32_t

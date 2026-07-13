@@ -1115,6 +1115,11 @@ on_search_entry_activate(GtkButton *widget, gpointer user_data) {
 static gboolean
 on_fsearch_window_delete_event(GtkWidget *widget, GdkEvent *event, gpointer user_data) {
     FsearchApplicationWindow *win = FSEARCH_APPLICATION_WINDOW(widget);
+    if (fsearch_application_is_background_resident(FSEARCH_APPLICATION_DEFAULT)) {
+        // Keep running in the tray instead of quitting: just hide the window.
+        gtk_widget_hide(widget);
+        return TRUE;
+    }
     fsearch_application_window_prepare_shutdown(win);
     g_clear_pointer(&widget, gtk_widget_destroy);
     return TRUE;

@@ -64,6 +64,7 @@ libfsearch_sources = [
     'fsearch_window.c',
     'fsearch_window_actions.c',
     'fsearch_preview.c',
+    'fsearch_tray.c',
 ]
 
 if have_inotify
@@ -81,6 +82,10 @@ fsearch_deps = [
     dependency('libpcre2-8', version: '>= 10.21'),
     dependency('icu-uc', version: '>= 4.4'),
 ]
+
+if ayatana_dep.found()
+    fsearch_deps += ayatana_dep
+endif
 
 fsearch_enums_headers = [
     'fsearch_result.h'

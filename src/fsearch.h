@@ -64,3 +64,9 @@ fsearch_application_get_database_dir(void);
 
 gboolean
 fsearch_application_has_file_manager_on_bus(FsearchApplication *self);
+
+// TRUE when the app has a working tray icon, i.e. it can stay resident in the
+// background. Used to decide whether closing/hiding a window should hide it away
+// instead of quitting the application.
+bool
+fsearch_application_is_background_resident(FsearchApplication *self);
