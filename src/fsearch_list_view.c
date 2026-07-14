@@ -75,6 +75,11 @@ struct _FsearchListView {
 
     gint extend_started_idx;
 
+    // When pressing a row that's part of a multi-selection we keep the whole
+    // selection (so it can be dragged) and only collapse to this single row on
+    // release, unless a drag&drop begins first. UNSET_ROW when inactive.
+    gint select_on_release_idx;
+
     gint num_rows;
     gint row_height;
 
@@ -802,6 +807,14 @@ on_fsearch_list_view_multi_press_gesture_pressed(GtkGestureMultiPress *gesture,
                 view->cursor_idx = row_idx;
                 fsearch_list_view_selection_toggle_silent(view, row_idx);
             }
+            else if (!view->single_click_activate && fsearch_list_view_selection_num_selected(view) > 1
+                     && fsearch_list_view_is_selected(view, row_idx)) {
+                // Pressed on a row that's part of a multi-selection: keep the whole
+                // selection (so it can be dragged) and defer collapsing to this
+                // single row until release (unless a drag&drop starts first).
+                view->cursor_idx = row_idx;
+                view->select_on_release_idx = row_idx;
+            }
             else {
                 view->cursor_idx = row_idx;
                 fsearch_list_view_selection_clear_silent(view);
@@ -862,6 +875,19 @@ on_fsearch_list_view_multi_press_gesture_released(GtkGestureMultiPress *gesture,
 
     if (button_pressed > 3) {
         return;
+    }
+
+    // A press on a multi-selection that didn't turn into a drag&drop (the
+    // drag-begin handler clears select_on_release_idx): collapse the selection
+    // to the clicked row now, matching a plain click.
+    if (button_pressed == GDK_BUTTON_PRIMARY && view->select_on_release_idx != UNSET_ROW) {
+        const int idx = view->select_on_release_idx;
+        view->select_on_release_idx = UNSET_ROW;
+        view->cursor_idx = idx;
+        fsearch_list_view_selection_clear_silent(view);
+        fsearch_list_view_selection_toggle_silent(view, idx);
+        fsearch_list_view_selection_changed(view);
+        gtk_widget_queue_draw(GTK_WIDGET(view));
     }
 
     int row_idx = fsearch_list_view_get_row_idx_for_y_view(view, y);
@@ -1113,6 +1139,12 @@ on_fsearch_list_view_bin_drag_gesture_begin(GtkGestureDrag *gesture,
                                             gdouble start_y_view,
                                             FsearchListView *view) {
     if (start_y_view > view->header_height && !view->single_click_activate) {
+        // A drag that began on an existing multi-selection is a drag&drop of that
+        // selection, not a rubberband selection: let GTK's DnD handle it.
+        if (view->select_on_release_idx != UNSET_ROW) {
+            return;
+        }
+
         if (!gtk_widget_has_focus(GTK_WIDGET(view))) {
             gtk_widget_grab_focus(GTK_WIDGET(view));
         }
@@ -1943,6 +1975,14 @@ fsearch_list_view_class_init(FsearchListViewClass *klass) {
 }
 
 static void
+on_fsearch_list_view_dnd_drag_begin(GtkWidget *widget, GdkDragContext *context, gpointer user_data) {
+    FsearchListView *view = FSEARCH_LIST_VIEW(widget);
+    // A drag&drop of the current selection has started: keep the whole selection
+    // intact (don't collapse it to a single row on release).
+    view->select_on_release_idx = UNSET_ROW;
+}
+
+static void
 fsearch_list_view_init(FsearchListView *view) {
     view->bin_window = NULL;
 
@@ -1959,6 +1999,7 @@ fsearch_list_view_init(FsearchListView *view) {
     view->highlight_cursor_idx = FALSE;
 
     view->extend_started_idx = UNSET_ROW;
+    view->select_on_release_idx = UNSET_ROW;
 
     view->scroll_timeout = 0;
 
@@ -1978,6 +2019,10 @@ fsearch_list_view_init(FsearchListView *view) {
                      "released",
                      G_CALLBACK(on_fsearch_list_view_multi_press_gesture_released),
                      view);
+
+    // Keep the multi-selection intact when a drag&drop of it starts (the drag
+    // source itself is set up by the window).
+    g_signal_connect(view, "drag-begin", G_CALLBACK(on_fsearch_list_view_dnd_drag_begin), NULL);
 
     view->rubberband_drag_gesture = gtk_gesture_drag_new(GTK_WIDGET(view));
     g_signal_connect(view->rubberband_drag_gesture,
@@ -2248,6 +2293,7 @@ fsearch_list_view_set_config(FsearchListView *view, uint32_t num_rows, int sort_
     view->highlight_cursor_idx = FALSE;
 
     view->extend_started_idx = UNSET_ROW;
+    view->select_on_release_idx = UNSET_ROW;
     view->num_rows = num_rows;
     view->list_height = num_rows * view->row_height;
     gtk_adjustment_set_value(view->vadjustment, 0);
