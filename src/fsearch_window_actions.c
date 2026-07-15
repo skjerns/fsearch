@@ -470,7 +470,18 @@ action_after_open(bool action_mouse) {
     if ((config->action_after_file_open_keyboard && !action_mouse)
         || (config->action_after_file_open_mouse && action_mouse)) {
         if (config->action_after_file_open == ACTION_AFTER_OPEN_CLOSE) {
-            g_application_quit(G_APPLICATION(FSEARCH_APPLICATION_DEFAULT));
+            // When running as a background-resident service (tray mode) keep the
+            // process alive so the database stays indexed; just hide the window
+            // instead of quitting and forcing a reindex on the next launch.
+            if (fsearch_application_is_background_resident(FSEARCH_APPLICATION_DEFAULT)) {
+                GtkWindow *win = gtk_application_get_active_window(GTK_APPLICATION(FSEARCH_APPLICATION_DEFAULT));
+                if (win) {
+                    gtk_widget_hide(GTK_WIDGET(win));
+                }
+            }
+            else {
+                g_application_quit(G_APPLICATION(FSEARCH_APPLICATION_DEFAULT));
+            }
         }
         else if (config->action_after_file_open == ACTION_AFTER_OPEN_MINIMIZE) {
             gtk_window_iconify(gtk_application_get_active_window(GTK_APPLICATION(FSEARCH_APPLICATION_DEFAULT)));
