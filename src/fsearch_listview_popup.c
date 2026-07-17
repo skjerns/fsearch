@@ -27,6 +27,36 @@
 #include "fsearch_listview_popup.h"
 
 static void
+add_default_text_editor_entry(GtkBuilder *builder) {
+    // Add an "Open with <default text editor>" item right below "Open".
+    // The editor is resolved dynamically from the system default for text/plain
+    // (e.g. Kate on KDE), so this follows the user's configured default.
+    g_autoptr(GAppInfo) editor = g_app_info_get_default_for_type("text/plain", FALSE);
+    if (!editor) {
+        return;
+    }
+    const char *app_id = g_app_info_get_id(editor);
+    if (!app_id) {
+        return;
+    }
+
+    const char *display_name = g_app_info_get_display_name(editor);
+    g_autofree char *label = g_strdup_printf(_("Open with %s"), display_name);
+
+    char detailed_action[1024] = "";
+    snprintf(detailed_action, sizeof(detailed_action), "win.open_with('%s')", app_id);
+
+    g_autoptr(GMenuItem) item = g_menu_item_new(label, detailed_action);
+    g_menu_item_set_icon(item, g_app_info_get_icon(editor));
+
+    GMenu *open_section = G_MENU(gtk_builder_get_object(builder, "fsearch_listview_menu_open_section"));
+    if (open_section) {
+        // position 1 -> directly after the "Open" item
+        g_menu_insert_item(open_section, 1, item);
+    }
+}
+
+static void
 add_file_properties_entry(GtkBuilder *builder) {
     FsearchApplication *app = FSEARCH_APPLICATION_DEFAULT;
     if (app && fsearch_application_has_file_manager_on_bus(app)) {
@@ -169,6 +199,7 @@ listview_popup_menu(GtkWidget *widget, FsearchDatabase *db, uint32_t view_id) {
     g_autoptr(GtkBuilder) builder = gtk_builder_new_from_resource("/io/github/cboxdoerfer/fsearch/ui/menus.ui");
 
     fill_open_with_menu(builder, db, view_id);
+    add_default_text_editor_entry(builder);
     add_file_properties_entry(builder);
 
     GMenu *menu_root = G_MENU(gtk_builder_get_object(builder, "fsearch_listview_popup_menu"));
