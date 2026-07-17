@@ -80,6 +80,12 @@ struct _FsearchListView {
     // release, unless a drag&drop begins first. UNSET_ROW when inactive.
     gint select_on_release_idx;
 
+    // Drag&drop source: we start DnD manually (see the bin drag gesture) rather
+    // than via gtk_drag_source_set, which would arm DnD across the whole widget
+    // (including the header) and hijack column-resize drags.
+    GtkTargetList *drag_source_target_list;
+    GdkDragAction drag_source_actions;
+
     gint num_rows;
     gint row_height;
 
@@ -1139,9 +1145,22 @@ on_fsearch_list_view_bin_drag_gesture_begin(GtkGestureDrag *gesture,
                                             gdouble start_y_view,
                                             FsearchListView *view) {
     if (start_y_view > view->header_height && !view->single_click_activate) {
-        // A drag that began on an existing multi-selection is a drag&drop of that
-        // selection, not a rubberband selection: let GTK's DnD handle it.
-        if (view->select_on_release_idx != UNSET_ROW) {
+        // A drag that begins on a selected row is a drag&drop of the current
+        // selection, not a rubberband selection. Start the DnD manually here
+        // (rather than via gtk_drag_source_set, which arms DnD across the whole
+        // widget and hijacks column-resize drags in the header).
+        const int start_row = fsearch_list_view_get_row_idx_for_y_view(view, start_y_view);
+        if (view->drag_source_target_list && is_row_idx_valid(view, start_row)
+            && fsearch_list_view_is_selected(view, start_row)) {
+            GdkEventSequence *sequence = gtk_gesture_single_get_current_sequence(GTK_GESTURE_SINGLE(gesture));
+            GdkEvent *event = (GdkEvent *)gtk_gesture_get_last_event(GTK_GESTURE(gesture), sequence);
+            gtk_drag_begin_with_coordinates(GTK_WIDGET(view),
+                                            view->drag_source_target_list,
+                                            view->drag_source_actions,
+                                            GDK_BUTTON_PRIMARY,
+                                            event,
+                                            -1,
+                                            -1);
             return;
         }
 
@@ -1918,6 +1937,7 @@ fsearch_list_view_destroy(GtkWidget *widget) {
     g_clear_object(&view->multi_press_gesture);
     g_clear_object(&view->rubberband_drag_gesture);
     g_clear_object(&view->col_resize_drag_gesture);
+    g_clear_pointer(&view->drag_source_target_list, gtk_target_list_unref);
 
     GTK_WIDGET_CLASS(fsearch_list_view_parent_class)->destroy(widget);
 }
@@ -2021,7 +2041,8 @@ fsearch_list_view_init(FsearchListView *view) {
                      view);
 
     // Keep the multi-selection intact when a drag&drop of it starts (the drag
-    // source itself is set up by the window).
+    // itself is begun manually in the bin drag gesture; the window supplies the
+    // targets via fsearch_list_view_enable_drag_source).
     g_signal_connect(view, "drag-begin", G_CALLBACK(on_fsearch_list_view_dnd_drag_begin), NULL);
 
     view->rubberband_drag_gesture = gtk_gesture_drag_new(GTK_WIDGET(view));
@@ -2411,6 +2432,17 @@ fsearch_list_view_set_single_click_activate(FsearchListView *view, gboolean valu
         return;
     }
     view->single_click_activate = value;
+}
+
+void
+fsearch_list_view_enable_drag_source(FsearchListView *view,
+                                     const GtkTargetEntry *targets,
+                                     gint n_targets,
+                                     GdkDragAction actions) {
+    g_return_if_fail(FSEARCH_IS_LIST_VIEW(view));
+    g_clear_pointer(&view->drag_source_target_list, gtk_target_list_unref);
+    view->drag_source_target_list = gtk_target_list_new(targets, n_targets);
+    view->drag_source_actions = actions;
 }
 
 FsearchListViewColumn *

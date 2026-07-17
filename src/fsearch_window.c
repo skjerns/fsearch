@@ -953,12 +953,11 @@ fsearch_application_window_init_listview(FsearchApplicationWindow *win) {
     g_signal_connect(list_view, "key-press-event", G_CALLBACK(on_listview_key_press_event), win);
 
     // Allow dragging the selected results into other applications as file URIs.
+    // The list view starts the drag manually from the row area only, so this must
+    // not use gtk_drag_source_set (which would arm DnD widget-wide and break
+    // column resizing in the header).
     static const GtkTargetEntry drag_targets[] = {{(char *)"text/uri-list", 0, 0}};
-    gtk_drag_source_set(GTK_WIDGET(list_view),
-                        GDK_BUTTON1_MASK,
-                        drag_targets,
-                        G_N_ELEMENTS(drag_targets),
-                        GDK_ACTION_COPY);
+    fsearch_list_view_enable_drag_source(list_view, drag_targets, G_N_ELEMENTS(drag_targets), GDK_ACTION_COPY);
     g_signal_connect(list_view, "drag-data-get", G_CALLBACK(on_listview_drag_data_get), win);
 
     win->result_view->list_view = list_view;

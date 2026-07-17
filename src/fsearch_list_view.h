@@ -133,6 +133,12 @@ fsearch_list_view_set_cursor(FsearchListView *view, int row_idx);
 void
 fsearch_list_view_set_single_click_activate(FsearchListView *view, gboolean value);
 
+void
+fsearch_list_view_enable_drag_source(FsearchListView *view,
+                                     const GtkTargetEntry *targets,
+                                     gint n_targets,
+                                     GdkDragAction actions);
+
 int
 fsearch_list_view_get_sort_order(FsearchListView *view);
 
