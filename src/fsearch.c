@@ -318,12 +318,12 @@ fsearch_application_toggle_window(FsearchApplication *self) {
     }
 
     GtkWidget *widget = GTK_WIDGET(window);
-    if (gtk_widget_get_visible(widget) && gtk_window_is_active(GTK_WINDOW(window))) {
-        // Visible and focused -> hide it away.
+    if (gtk_widget_get_visible(widget)) {
+        // Visible (whether focused or buried behind other windows) -> hide it.
         gtk_widget_hide(widget);
     }
     else {
-        // Hidden or not focused -> bring it to the front and focus the search.
+        // Hidden -> bring it to the front and focus the search.
         gtk_widget_show(widget);
         gtk_window_present_with_time(GTK_WINDOW(window), gtk_get_current_event_time());
         fsearch_application_window_focus_search_entry(window);
