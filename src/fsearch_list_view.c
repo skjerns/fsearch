@@ -85,6 +85,10 @@ struct _FsearchListView {
     // (including the header) and hijack column-resize drags.
     GtkTargetList *drag_source_target_list;
     GdkDragAction drag_source_actions;
+    // A press landed on a selected row: a DnD is armed but only actually started
+    // once the pointer moves past the drag threshold, so plain clicks and
+    // double-clicks aren't swallowed by an over-eager drag.
+    gboolean dnd_pending;
 
     gint num_rows;
     gint row_height;
@@ -908,6 +912,7 @@ on_fsearch_list_view_bin_drag_gesture_end(GtkGestureDrag *gesture,
                                           gdouble offset_y,
                                           FsearchListView *view) {
     //  GdkEventSequence *sequence = gtk_gesture_single_get_current_sequence(GTK_GESTURE_SINGLE(gesture));
+    view->dnd_pending = FALSE;
     if (view->rubberband_drag_mode) {
         view->rubberband_drag_mode = FALSE;
         view->rubberband_state = RUBBERBAND_SELECT_INACTIVE;
@@ -1131,6 +1136,32 @@ on_fsearch_list_view_bin_drag_gesture_update(GtkGestureDrag *gesture,
     //     return;
     // }
 
+    if (view->dnd_pending) {
+        // A DnD is armed (the press was on a selected row): only start it once the
+        // pointer has actually moved past the drag threshold, otherwise a plain
+        // click or a double-click would be swallowed by an over-eager drag.
+        gdouble start_x = 0, start_y = 0;
+        gtk_gesture_drag_get_start_point(gesture, &start_x, &start_y);
+        if (!gtk_drag_check_threshold(GTK_WIDGET(view),
+                                      (gint)start_x,
+                                      (gint)start_y,
+                                      (gint)(start_x + offset_x),
+                                      (gint)(start_y + offset_y))) {
+            return;
+        }
+        view->dnd_pending = FALSE;
+        GdkEventSequence *sequence = gtk_gesture_single_get_current_sequence(GTK_GESTURE_SINGLE(gesture));
+        GdkEvent *event = (GdkEvent *)gtk_gesture_get_last_event(GTK_GESTURE(gesture), sequence);
+        gtk_drag_begin_with_coordinates(GTK_WIDGET(view),
+                                        view->drag_source_target_list,
+                                        view->drag_source_actions,
+                                        GDK_BUTTON_PRIMARY,
+                                        event,
+                                        -1,
+                                        -1);
+        return;
+    }
+
     if (view->rubberband_drag_mode == FALSE) {
         return;
     }
@@ -1144,23 +1175,17 @@ on_fsearch_list_view_bin_drag_gesture_begin(GtkGestureDrag *gesture,
                                             gdouble start_x_view,
                                             gdouble start_y_view,
                                             FsearchListView *view) {
+    view->dnd_pending = FALSE;
     if (start_y_view > view->header_height && !view->single_click_activate) {
         // A drag that begins on a selected row is a drag&drop of the current
-        // selection, not a rubberband selection. Start the DnD manually here
-        // (rather than via gtk_drag_source_set, which arms DnD across the whole
-        // widget and hijacks column-resize drags in the header).
+        // selection, not a rubberband selection. Arm the DnD here; it is started
+        // manually from the drag-update handler once the pointer crosses the drag
+        // threshold (rather than via gtk_drag_source_set, which arms DnD across
+        // the whole widget and hijacks column-resize drags in the header).
         const int start_row = fsearch_list_view_get_row_idx_for_y_view(view, start_y_view);
         if (view->drag_source_target_list && is_row_idx_valid(view, start_row)
             && fsearch_list_view_is_selected(view, start_row)) {
-            GdkEventSequence *sequence = gtk_gesture_single_get_current_sequence(GTK_GESTURE_SINGLE(gesture));
-            GdkEvent *event = (GdkEvent *)gtk_gesture_get_last_event(GTK_GESTURE(gesture), sequence);
-            gtk_drag_begin_with_coordinates(GTK_WIDGET(view),
-                                            view->drag_source_target_list,
-                                            view->drag_source_actions,
-                                            GDK_BUTTON_PRIMARY,
-                                            event,
-                                            -1,
-                                            -1);
+            view->dnd_pending = TRUE;
             return;
         }
 
