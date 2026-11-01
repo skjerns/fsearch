@@ -1085,10 +1085,15 @@ on_search_entry_key_press_event(GtkWidget *widget, GdkEvent *event, gpointer use
     guint keyval;
     gdk_event_get_keyval(event, &keyval);
     if (keyval == GDK_KEY_Down) {
-        const gint cursor_idx = fsearch_list_view_get_cursor(win->result_view->list_view);
-        gtk_widget_grab_focus(GTK_WIDGET(win->result_view->list_view));
-        fsearch_list_view_set_cursor(win->result_view->list_view, cursor_idx);
-        return TRUE;
+        FsearchListView *list_view = win->result_view->list_view;
+        gtk_widget_grab_focus(GTK_WIDGET(list_view));
+        if (fsearch_list_view_get_num_rows(list_view) > 0) {
+            // Forward the key press, so the list view handles it like any other Down press: the first result
+            // counts as current (it's what Enter in the search entry opens), so one press already lands on the
+            // second result, or one below the last focused row.
+            gtk_widget_event(GTK_WIDGET(list_view), event);
+        }
+        return GDK_EVENT_STOP;
     }
     return FALSE;
 }
