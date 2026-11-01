@@ -27,7 +27,6 @@
 #include <glib-object.h>
 #include <glib.h>
 #include <glib/gi18n.h>
-#include <gtk/gtkenums.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -420,7 +419,7 @@ database_sort(FsearchDatabase *self, FsearchDatabaseWork *work) {
 
     const uint32_t id = fsearch_database_work_get_view_id(work);
     const FsearchDatabaseIndexProperty sort_order = fsearch_database_work_sort_get_sort_order(work);
-    const GtkSortType sort_type = fsearch_database_work_sort_get_sort_type(work);
+    const FsearchSortDirection sort_direction = fsearch_database_work_sort_get_sort_direction(work);
     g_autoptr(GCancellable) cancellable = fsearch_database_work_get_cancellable(work);
 
     signal_emit(self, SIGNAL_SORT_STARTED, GUINT_TO_POINTER(id), NULL, 1, NULL, NULL);
@@ -428,7 +427,7 @@ database_sort(FsearchDatabase *self, FsearchDatabaseWork *work) {
     g_autoptr(GMutexLocker) locker = fsearch_database_index_store_get_locker(self->store);
     g_assert_nonnull(locker);
 
-    fsearch_database_index_store_sort_results(self->store, id, sort_order, sort_type, cancellable);
+    fsearch_database_index_store_sort_results(self->store, id, sort_order, sort_direction, cancellable);
 
     signal_emit_sort_finished(self, id, fsearch_database_index_store_get_search_info(self->store, id));
 }
@@ -443,7 +442,7 @@ database_search(FsearchDatabase *self, FsearchDatabaseWork *work) {
 
     g_autoptr(FsearchQuery) query = fsearch_database_work_search_get_query(work);
     FsearchDatabaseIndexProperty sort_order = fsearch_database_work_search_get_sort_order(work);
-    const GtkSortType sort_type = fsearch_database_work_search_get_sort_type(work);
+    const FsearchSortDirection sort_direction = fsearch_database_work_search_get_sort_direction(work);
     g_autoptr(GCancellable) cancellable = fsearch_database_work_get_cancellable(work);
 
     signal_emit(self, SIGNAL_SEARCH_STARTED, GUINT_TO_POINTER(id), NULL, 1, NULL, NULL);
@@ -451,7 +450,7 @@ database_search(FsearchDatabase *self, FsearchDatabaseWork *work) {
     g_autoptr(GMutexLocker) locker = fsearch_database_index_store_get_locker(self->store);
     g_assert_nonnull(locker);
 
-    const bool result = fsearch_database_index_store_search(self->store, id, query, sort_order, sort_type, cancellable);
+    const bool result = fsearch_database_index_store_search(self->store, id, query, sort_order, sort_direction, cancellable);
 
     signal_emit_search_finished(self, id, fsearch_database_index_store_get_search_info(self->store, id));
 
@@ -1300,24 +1299,10 @@ fsearch_database_class_init(FsearchDatabaseClass *klass) {
                                                    G_TYPE_UINT,
                                                    G_TYPE_UINT,
                                                    FSEARCH_TYPE_DATABASE_ENTRY_INFO);
-    signals[SIGNAL_APPLY_STARTED] = g_signal_new("apply-started",
-                                                 G_TYPE_FROM_CLASS(klass),
-                                                 G_SIGNAL_RUN_LAST,
-                                                 0,
-                                                 NULL,
-                                                 NULL,
-                                                 NULL,
-                                                 G_TYPE_NONE,
-                                                 0);
-    signals[SIGNAL_APPLY_FINISHED] = g_signal_new("apply-finished",
-                                                  G_TYPE_FROM_CLASS(klass),
-                                                  G_SIGNAL_RUN_LAST,
-                                                  0,
-                                                  NULL,
-                                                  NULL,
-                                                  NULL,
-                                                  G_TYPE_NONE,
-                                                  0);
+    signals[SIGNAL_APPLY_STARTED] =
+        g_signal_new("apply-started", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+    signals[SIGNAL_APPLY_FINISHED] =
+        g_signal_new("apply-finished", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
 static void
@@ -1325,11 +1310,7 @@ fsearch_database_init(FsearchDatabase *self) {
     g_mutex_init(&self->mutex);
     g_mutex_init(&self->scan_mutex);
     self->cancellable = g_cancellable_new();
-#if GLIB_CHECK_VERSION(2, 70, 0)
     self->io_pool = g_thread_pool_new_full(io_thread_cb, self, (GDestroyNotify)fsearch_database_work_unref, 1, TRUE, NULL);
-#else
-    self->io_pool = g_thread_pool_new(io_thread_cb, self, 1, TRUE, NULL);
-#endif
     self->worker_ctx = g_main_context_new();
     self->worker_loop = g_main_loop_new(self->worker_ctx, FALSE);
     self->worker_thread = g_thread_new("FsearchDatabaseWorker", database_worker_thread, self);
@@ -1480,10 +1461,7 @@ fsearch_database_rescan_blocking(FsearchDatabase *self) {
 
     g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&self->mutex);
     g_assert_nonnull(locker);
-    database_rescan_sync(self,
-                         self->include_manager,
-                         self->exclude_manager,
-                         DATABASE_INDEX_PROPERTY_FLAG_DEFAULT);
+    database_rescan_sync(self, self->include_manager, self->exclude_manager, DATABASE_INDEX_PROPERTY_FLAG_DEFAULT);
 
     return FSEARCH_RESULT_SUCCESS;
 }

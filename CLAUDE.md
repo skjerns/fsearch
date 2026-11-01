@@ -4,7 +4,12 @@ Personal fork (`origin` = `skjerns/fsearch`) of upstream FSearch (`upstream` = `
 a fast GTK3 file search app for Linux written in C. The fork carries small UX/behaviour changes the
 owner likes on top of an upstream release; it is not meant to be upstreamed as-is.
 
-- Current base: upstream **FSearch 0.3** (`506e1ede`). Fork commits are everything in `git log 506e1ede..HEAD`.
+- Current base: upstream **`master`** (merged 2026-11-01 at `1208a34e`, i.e. past the 0.3.2 release; the
+  0.3.x tags live on a separate stable branch of cherry-picks, so merge `upstream/master`, not the tags).
+  Fork-only changes: `git log --no-merges 506e1ede..HEAD ^upstream/master`.
+- Upstream master requires GTK >= 3.24 / GLib >= 2.72 and splits `src/meson.build` into core and UI sources;
+  GTK-dependent fork files (e.g. `fsearch_tray.c`) belong in `libfsearch_ui_sources`. The list view uses
+  `GtkEventController`s (key/motion) instead of legacy event vfuncs.
 - Old fork on top of 0.2 lives on branches `fork-0.2` / `inode_realtime` (it had its own inotify monitor
   `fsearch_monitor.c`; 0.3 ships upstream folder monitoring, so that module was dropped in the port).
 - `FORK_CHANGES.md` is the porting guide written for moving the 0.2 fork onto 0.3. Some file/line

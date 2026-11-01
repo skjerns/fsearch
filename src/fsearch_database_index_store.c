@@ -23,7 +23,6 @@
 #include <glib.h>
 #include <glib/gi18n.h>
 #include <gobject/gobject.h>
-#include <gtk/gtkenums.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -265,8 +264,8 @@ index_store_remove_from_store_worker(FsearchDatabaseChunkedArray *chunks, Dynami
     if (marked && num_entries > num_total / 100) {
         // When removing lots of entries, its usually more efficient to walk the entire list of entries and remove
         // marked ones in bulk
-        uint32_t removed_entries = fsearch_database_chunked_array_remove_marked_folders(chunks);
-        g_assert(removed_entries == num_entries);
+        // Mismatches are reported by remove_marked_folders itself
+        fsearch_database_chunked_array_remove_marked_folders(chunks, (int32_t)num_entries);
     }
     else {
         // When there are only few entries to be removed, we avoid iterating over the entire list of entires
@@ -1301,7 +1300,7 @@ void
 fsearch_database_index_store_sort_results(FsearchDatabaseIndexStore *store,
                                           uint32_t id,
                                           FsearchDatabaseIndexProperty sort_order,
-                                          GtkSortType sort_type,
+                                          FsearchSortDirection sort_direction,
                                           GCancellable *cancellable) {
     g_return_if_fail(store);
     g_return_if_fail(store->search_results);
@@ -1322,7 +1321,7 @@ fsearch_database_index_store_sort_results(FsearchDatabaseIndexStore *store,
         files_fast_sorted = fsearch_database_chunked_array_get_joined(files_fast_sort_index);
         folders_fast_sorted = fsearch_database_chunked_array_get_joined(folders_fast_sort_index);
     }
-    fsearch_database_search_view_sort(view, files_fast_sorted, folders_fast_sorted, sort_order, sort_type, cancellable);
+    fsearch_database_search_view_sort(view, files_fast_sorted, folders_fast_sorted, sort_order, sort_direction, cancellable);
 }
 
 static DynamicArray *
@@ -1403,7 +1402,7 @@ fsearch_database_index_store_search(FsearchDatabaseIndexStore *store,
                                     uint32_t id,
                                     FsearchQuery *query,
                                     FsearchDatabaseIndexProperty sort_order,
-                                    GtkSortType sort_type,
+                                    FsearchSortDirection sort_direction,
                                     GCancellable *cancellable) {
     g_return_val_if_fail(store, false);
     g_return_val_if_fail(store->search_results, false);
@@ -1414,12 +1413,15 @@ fsearch_database_index_store_search(FsearchDatabaseIndexStore *store,
     g_autoptr(FsearchDatabaseChunkedArray) folder_chunks = fsearch_database_index_store_get_folders(store, sort_order);
 
     if (!file_chunks && !folder_chunks) {
+        g_debug("[index_store] no fast sort index for sort order %s, falling back to name",
+                fsearch_database_index_property_to_string(sort_order));
         sort_order = DATABASE_INDEX_PROPERTY_NAME;
         file_chunks = fsearch_database_index_store_get_files(store, sort_order);
         folder_chunks = fsearch_database_index_store_get_folders(store, sort_order);
     }
 
     if (!file_chunks && !folder_chunks) {
+        g_debug("[index_store] search skipped: store has no entries to search");
         return false;
     }
 
@@ -1428,6 +1430,9 @@ fsearch_database_index_store_search(FsearchDatabaseIndexStore *store,
     // We just need to make sure that the search threads get a roughly equally sized range to search in.
     g_autoptr(DynamicArray) files = file_chunks ? fsearch_database_chunked_array_get_joined(file_chunks) : NULL;
     g_autoptr(DynamicArray) folders = folder_chunks ? fsearch_database_chunked_array_get_joined(folder_chunks) : NULL;
+
+    const uint32_t num_searched = (files ? darray_get_num_items(files) : 0)
+                                + (folders ? darray_get_num_items(folders) : 0);
 
     const bool matches_everything = fsearch_query_matches_everything(query);
     g_autoptr(DynamicArray) found_files = NULL;
@@ -1442,6 +1447,22 @@ fsearch_database_index_store_search(FsearchDatabaseIndexStore *store,
                           ? g_steal_pointer(&folders)
                           : search_entries(query, folders, store->worker_pool, store->worker_pool_collect_queue, cancellable);
     }
+
+    const uint32_t num_found_files = found_files ? darray_get_num_items(found_files) : 0;
+    const uint32_t num_found_folders = found_folders ? darray_get_num_items(found_folders) : 0;
+    const double search_time = g_timer_elapsed(timer, NULL);
+
+    g_debug("[index_store] search \"%s\": %u of %u matched (%u folder%s, %u file%s) in %.3f ms%s%s",
+            query->search_term ? query->search_term : "",
+            num_found_folders + num_found_files,
+            num_searched,
+            num_found_folders,
+            num_found_folders == 1 ? "" : "s",
+            num_found_files,
+            num_found_files == 1 ? "" : "s",
+            search_time * 1000.0,
+            matches_everything ? ", match-all" : "",
+            g_cancellable_is_cancelled(cancellable) ? ", cancelled" : "");
 
     if (found_files || found_folders) {
         // If the search got cancelled partway through, found_files/found_folders only reflect
@@ -1459,10 +1480,9 @@ fsearch_database_index_store_search(FsearchDatabaseIndexStore *store,
                                                                            NULL,
                                                                            fsearch_database_sort_order_chain_for_property(
                                                                                sort_order),
-                                                                           sort_type,
+                                                                           sort_direction,
                                                                            is_complete);
         g_hash_table_insert(store->search_results, GUINT_TO_POINTER(id), view);
-        g_debug("[index_store] search duration: %f", g_timer_elapsed(timer, NULL));
 
         return is_complete;
     }

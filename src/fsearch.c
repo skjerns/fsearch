@@ -238,6 +238,8 @@ on_preferences_dialog_response(GtkDialog *dialog, gint response_id, gpointer use
 
         set_accels_for_escape(G_APPLICATION(self));
     }
+
+    gtk_widget_destroy(GTK_WIDGET(dialog));
 }
 
 static void
@@ -255,8 +257,7 @@ action_preferences_activated(GSimpleAction *action, GVariant *parameter, gpointe
     GtkWidget *pref = GTK_WIDGET(fsearch_preferences_dialog_new(win_active, self->config));
     fsearch_preferences_dialog_set_page(FSEARCH_PREFERENCES_DIALOG(pref), page);
     g_signal_connect(GTK_DIALOG(pref), "response", G_CALLBACK(on_preferences_dialog_response), self);
-    gtk_dialog_run(GTK_DIALOG(pref));
-    g_clear_pointer(&pref, gtk_widget_destroy);
+    gtk_widget_show(pref);
 }
 
 static void
@@ -538,7 +539,7 @@ fsearch_application_startup(GApplication *app) {
     }
     set_accel_for_action(app, "win.toggle_focus", "Tab");
     set_accel_for_action(app, "win.focus_search", "<control>f");
-    set_accel_for_action(app, "app.new_window", "<control>n");
+    set_accel_for_action(app, "app.new_window(false)", "<control>n");
     set_accel_for_action(app, "win.select_all", "<control>a");
     set_accel_for_action(app, "win.match_case", "<control>i");
     set_accel_for_action(app, "win.search_mode", "<control>r");
@@ -573,6 +574,27 @@ fsearch_application_init(FsearchApplication *app) {
     g_action_map_add_action_entries(G_ACTION_MAP(app), fsearch_app_entries, G_N_ELEMENTS(fsearch_app_entries), app);
 }
 
+// NOTE: Bump whenever we want to display a new welcome dialog
+// Make sure to also update the content of the welcome dialog
+#define FSEARCH_WELCOME_DIALOG_VERSION "0.3"
+
+static int
+version_compare(const char *a, const char *b) {
+    g_auto(GStrv) version_a = g_strsplit(a ? a : "", ".", -1);
+    g_auto(GStrv) version_b = g_strsplit(b ? b : "", ".", -1);
+    const guint num_version_components_a = g_strv_length(version_a);
+    const guint num_version_components_b = g_strv_length(version_b);
+
+    for (guint i = 0; i < MAX(num_version_components_a, num_version_components_b); i++) {
+        const long c_a = i < num_version_components_a ? strtol(version_a[i], NULL, 10) : 0;
+        const long c_b = i < num_version_components_b ? strtol(version_b[i], NULL, 10) : 0;
+        if (c_a != c_b) {
+            return c_a < c_b ? -1 : 1;
+        }
+    }
+    return 0;
+}
+
 static bool
 should_show_welcome_dialog(void) {
     g_autofree gchar *state_dir = fsearch_file_utils_get_app_user_state_dir();
@@ -589,7 +611,8 @@ should_show_welcome_dialog(void) {
     if (g_key_file_load_from_file(key_file, state_file, G_KEY_FILE_NONE, NULL)) {
         g_autofree gchar *last_version = g_key_file_get_string(key_file, "State", "last_seen_version", NULL);
 
-        if (g_strcmp0(last_version, PACKAGE_VERSION) != 0) {
+        // Only show if the user hasn't yet seen a version with this (or newer) welcome content.
+        if (version_compare(last_version, FSEARCH_WELCOME_DIALOG_VERSION) < 0) {
             should_show = true;
         }
     }
@@ -597,7 +620,6 @@ should_show_welcome_dialog(void) {
         should_show = true;
     }
 
-    // Update the INI file so the dialog isn't shown again for this version
     if (should_show) {
         g_key_file_set_string(key_file, "State", "last_seen_version", PACKAGE_VERSION);
 
@@ -627,8 +649,8 @@ fsearch_welcome_dialog_show(GtkWindow *parent) {
     gtk_window_set_transient_for(GTK_WINDOW(dialog), parent);
     gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
 
-    gtk_dialog_run(GTK_DIALOG(dialog));
-    gtk_widget_destroy(dialog);
+    g_signal_connect_swapped(dialog, "response", G_CALLBACK(gtk_widget_destroy), dialog);
+    gtk_widget_show(dialog);
 }
 
 static void

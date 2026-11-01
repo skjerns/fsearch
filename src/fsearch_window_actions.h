@@ -33,3 +33,6 @@ fsearch_window_action_open_generic(FsearchApplicationWindow *win, bool open_pare
 // URIs (caller frees with g_strfreev), or NULL if nothing is selected.
 GStrv
 fsearch_window_actions_get_selected_file_uris(FsearchApplicationWindow *win);
+
+void
+fsearch_window_action_open_row(FsearchApplicationWindow *win, uint32_t row_idx, bool open_parent_folder);

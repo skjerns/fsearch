@@ -4,7 +4,14 @@ A summary of everything this fork adds on top of upstream `cboxdoerfer/fsearch`,
 and briefly how each is implemented, so the changes can be re-applied selectively
 onto a newer upstream release.
 
-Fork base: diverges from upstream at commit `463d7af`. All commits listed under
+> **Current state (2026-11-01):** the fork has been re-applied onto 0.3 and then
+> merged with `upstream/master` (`1208a34e`, past 0.3.2). The sections below were
+> written for porting the 0.2-based fork; for 0.3+ the inotify monitor (§1) is
+> replaced by upstream folder monitoring, and DnD (§8) is now started manually from
+> the list view's bin drag gesture (`fsearch_list_view_enable_drag_source`).
+> List fork-only commits with `git log --no-merges 506e1ede..HEAD ^upstream/master`.
+
+Fork base (0.2 fork): diverged from upstream at commit `463d7af`. All commits listed under
 each feature are on `master`.
 
 > **Note on diffing:** the working tree/history contains a line-ending
