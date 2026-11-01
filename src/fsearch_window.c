@@ -1080,13 +1080,13 @@ on_search_entry_key_press_event(GtkWidget *widget, GdkEvent *event, gpointer use
     FsearchApplicationWindow *win = user_data;
     guint keyval;
     gdk_event_get_keyval(event, &keyval);
-    if (keyval == GDK_KEY_Down) {
+    if (keyval == GDK_KEY_Down || keyval == GDK_KEY_Up) {
         FsearchListView *list_view = win->result_view->list_view;
         gtk_widget_grab_focus(GTK_WIDGET(list_view));
         if (fsearch_list_view_get_num_rows(list_view) > 0) {
-            // Forward the key press, so the list view handles it like any other Down press: the first result
-            // counts as current (it's what Enter in the search entry opens), so one press already lands on the
-            // second result, or one below the last focused row.
+            // Forward the key press, so the list view handles it like any other Down/Up press: the first result
+            // counts as current (it's what Enter in the search entry opens), so Down already lands on the second
+            // result, and both move one row from the last focused row.
             gtk_widget_event(GTK_WIDGET(list_view), event);
         }
         return GDK_EVENT_STOP;

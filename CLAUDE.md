@@ -56,8 +56,9 @@ Style: 4-space indent, 120 columns (`.editorconfig`), GLib/GTK conventions, `GDK
   the window is in the background). Closing the window and "close after open" hide instead of quitting,
   so the index stays in memory.
 - Search entry: whole query selected on focus/toggle (focus-in after-handler + `select_search_entry_on_focus`).
-- Down in the search entry focuses the results and moves straight to the second row (the first row is the
-  implicit current one, which Enter opens); the key event is forwarded to the list view.
+- Down/Up in the search entry focus the results and move one row right away (Down from a fresh search lands
+  on the second row; the first row is the implicit current one, which Enter opens); the key event is
+  forwarded to the list view.
 - `/term` or `\term` searches `term` as a substring of the path (lexer maps `\` to `/`).
 - Drag & drop of (multi-)selected results out as `text/uri-list`, started manually from the list view's
   drag gesture after the drag threshold (not `gtk_drag_source_set`, which hijacked column resizing).
